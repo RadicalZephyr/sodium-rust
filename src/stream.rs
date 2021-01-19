@@ -368,7 +368,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// called with the current state and the new event value. The
     /// accumulating function may construct FRP logic or use
     /// [`Cell::sample`], in which case it's equivalent to
-    /// [`snapshot`][Stream::snapshot]ing the cell. In additon, the
+    /// [`snapshot`][Stream::snapshot]ing the cell. In addition, the
     /// function must be referentially transparent.
     pub fn accum<S, F>(&self, init_state: S, f: F) -> Cell<S>
     where
