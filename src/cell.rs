@@ -11,7 +11,7 @@ use crate::sodium_ctx::SodiumCtx;
 use crate::stream::Stream;
 use crate::Dep;
 
-/// Represents a value of type `A` that changes over time.
+/// Represents a value that changes over time.
 ///
 /// In other Functional Reactive Programming (FRP) systems this is
 /// also called a _behavior_, _property_, or a _signal_. A `Cell`

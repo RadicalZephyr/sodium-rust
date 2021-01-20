@@ -7,8 +7,7 @@ use crate::listener::Listener;
 use crate::sodium_ctx::SodiumCtx;
 use crate::Lazy;
 
-/// Represents a stream of discrete events/firings containing values
-/// of type `A`.
+/// Represents a stream of discrete events/firings.
 ///
 /// Also known in other FRP systems as an _event_ (which would contain
 /// _event occurrences_), an _event stream_, an _observable_, or a
