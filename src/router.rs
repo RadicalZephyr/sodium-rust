@@ -6,6 +6,15 @@ use std::hash::Hash;
 /// Create a new Router that routes event items of type `A` to zero or
 /// more [`Stream`]s of type `K` according to a given selector
 /// function.
+///
+/// [`Router`] is purely a tool for improving performance of your FRP
+/// programs.  When you find yourself filtering out many different
+/// types of values from the same [`Stream`] and the system starts to
+/// become too slow, then you should consider using [`Router`] to
+/// provide that filtering. The purpose of Router is to provide a more
+/// efficient [`Stream::filter`] for when your filtering a lot off the
+/// same stream. It creates less work for the backend when updating
+/// the graph. It is a last resort when struggling with performance.
 pub struct Router<A, K> {
     impl_: RouterImpl<A, K>,
 }
