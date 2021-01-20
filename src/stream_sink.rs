@@ -5,7 +5,9 @@ use crate::stream::Stream;
 /// A [`Stream`] that allows values to be pushed into it, acting as an
 /// interface between the world of I/O and the world of FRP.
 ///
-/// ## Note: This should only be used from _outside_ the context of
+/// ## Note:
+///
+/// This should only be used from _outside_ the context of
 /// the Sodium system to inject data from I/O into the reactive system.
 pub struct StreamSink<A> {
     pub impl_: StreamSinkImpl<A>,
