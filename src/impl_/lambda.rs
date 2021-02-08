@@ -2,9 +2,83 @@
 
 use crate::impl_::dep::Dep;
 
+pub trait DependsOn<T> {
+    fn dependencies(&self) -> Option<&Vec<Dep>>;
+}
+
+/// Generate immutable argument Fn trait aliases and necessary impls.
+///
+/// Invoking this macro like so:
+///
+/// ```ignore
+/// fn_traits! {
+///    Fn1: 'a, A1 => R,
+/// }
+/// ```
+///
+/// Will produce roughly this output:
+///
+/// ```ignore
+/// pub trait Fn1<'a, A1: 'a, Result>: DependsOn<(A1, Result)> + Fn(&'a A1) -> Result {}
+///
+/// impl<'a, T, A1: 'a, Result> Fn1<'a, A1, Result> for T where
+///     T: DependsOn<(A1, Result)> + Fn(&'a A1) -> Result
+/// {
+/// }
+///
+/// impl<'a, T, A1: 'a, Result> DependsOn<(A1, Result)> for T
+/// where
+///     T: Fn(&'a A1) -> Result,
+/// {
+///     fn dependencies(&self) -> Vec<u8> {
+///         Vec::new()
+///     }
+/// }
+/// ```
+macro_rules! fn_traits {
+    ($( $fn:ident : $l:tt, $($arg:ident),* => $res:ident ),+ $(,)? ) => {
+        $(
+            pub trait $fn < $l, $($arg: $l),* , $res >:
+            DependsOn<($($arg),*, $res)> + Fn($(& $l $arg),*) -> $res
+            {}
+
+            impl< $l, $($arg: $l),* , $res, T > $fn < $l, $($arg),* , $res > for T
+            where
+                T: DependsOn<($($arg),*, $res)> + Fn($(& $l $arg),*) -> $res
+            {}
+
+            impl< $l, $($arg: $l),* , $res, T > DependsOn<($($arg),*, $res)> for T
+            where
+                T: Fn($(& $l $arg),*) -> $res
+            {
+                fn dependencies(&self) -> Option<&Vec<Dep>> {
+                    None
+                }
+            }
+
+        )*
+    };
+}
+
+fn_traits! {
+    Fn1: 'a, A1 => R,
+    Fn2: 'a, A1, A2 => R,
+    Fn3: 'a, A1, A2, A3 => R,
+    Fn4: 'a, A1, A2, A3, A4 => R,
+    Fn5: 'a, A1, A2, A3, A4, A5 => R,
+    Fn6: 'a, A1, A2, A3, A4, A5, A6 => R,
+}
+
 pub struct Lambda<FN> {
     f: FN,
     deps: Vec<Dep>,
+}
+
+pub fn deps<F, Args>(f: F) -> Vec<Dep>
+where
+    F: DependsOn<Args>,
+{
+    f.dependencies().cloned().unwrap_or_else(Vec::new)
 }
 
 pub fn lambda1_deps<A, B, FN: IsLambda1<A, B>>(f: &FN) -> Vec<Dep> {
