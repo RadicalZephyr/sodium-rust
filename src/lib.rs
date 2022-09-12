@@ -40,8 +40,6 @@ pub use self::impl_::lambda::IsLambda6;
 #[doc(hidden)]
 pub use self::impl_::lambda::Lambda;
 pub use self::impl_::lazy::Lazy;
-#[doc(hidden)]
-pub use self::impl_::node::Node;
 pub use self::listener::Listener;
 pub use self::operational::Operational;
 pub use self::router::Router;
