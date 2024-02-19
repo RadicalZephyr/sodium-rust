@@ -2,7 +2,7 @@ use crate::impl_::cell::Cell;
 use crate::impl_::dep::Dep;
 use crate::impl_::lambda::IsLambda1;
 use crate::impl_::lambda::IsLambda2;
-use crate::impl_::lambda::{lambda1, lambda1_deps, lambda2_deps};
+use crate::impl_::lambda::lambda1;
 use crate::impl_::lazy::Lazy;
 use crate::impl_::listener::Listener;
 use crate::impl_::node::{box_clone_vec_is_node, IsNode, IsWeakNode, Node, WeakNode};
@@ -253,7 +253,7 @@ impl<A: Send + 'static> Stream<A> {
         mut f: FN,
     ) -> Stream<C> {
         let cb = cb.clone();
-        let mut f_deps = lambda2_deps(&f);
+        let mut f_deps = f.deps();
         f_deps.push(Dep::new(cb.node().gc_node().clone()));
         self.map(lambda1(move |a: &A| f.call(a, &cb.sample()), f_deps))
     }
@@ -269,7 +269,7 @@ impl<A: Send + 'static> Stream<A> {
         let self_ = self.clone();
         let sodium_ctx = self.sodium_ctx();
         Stream::_new(&sodium_ctx, |s: StreamWeakForwardRef<B>| {
-            let f_deps = lambda1_deps(&f);
+            let f_deps = f.deps();
             let node = Node::new(
                 &sodium_ctx,
                 NodeName::STREAM_MAP,
@@ -298,7 +298,7 @@ impl<A: Send + 'static> Stream<A> {
         let self_ = self.clone();
         let sodium_ctx = self.sodium_ctx();
         Stream::_new(&sodium_ctx, |s: StreamWeakForwardRef<A>| {
-            let pred_deps = lambda1_deps(&pred);
+            let pred_deps = pred.deps();
             let node = Node::new(
                 &sodium_ctx,
                 NodeName::STREAM_FILTER,
@@ -339,7 +339,7 @@ impl<A: Send + 'static> Stream<A> {
         let s2_dep = s2.to_dep();
         let sodium_ctx = self.sodium_ctx();
         Stream::_new(&sodium_ctx, |s: StreamWeakForwardRef<A>| {
-            let f_deps = lambda2_deps(&f);
+            let f_deps = f.deps();
             let node = Node::new(
                 &sodium_ctx,
                 NodeName::STREAM_MERGE,
@@ -482,7 +482,7 @@ impl<A: Send + 'static> Stream<A> {
     ) -> Listener {
         self.sodium_ctx().transaction(|| {
             let self_ = self.clone();
-            let f_deps = lambda1_deps(&k);
+            let f_deps = k.deps();
             let node = Node::new(
                 &self.sodium_ctx(),
                 NodeName::STREAM_LISTEN,

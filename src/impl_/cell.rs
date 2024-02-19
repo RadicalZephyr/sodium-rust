@@ -6,8 +6,7 @@ use crate::impl_::lambda::IsLambda4;
 use crate::impl_::lambda::IsLambda5;
 use crate::impl_::lambda::IsLambda6;
 use crate::impl_::lambda::{
-    lambda1, lambda1_deps, lambda2, lambda2_deps, lambda3, lambda3_deps, lambda4_deps,
-    lambda5_deps, lambda6_deps,
+    lambda1, lambda2, lambda3,
 };
 use crate::impl_::lazy::Lazy;
 use crate::impl_::listener::Listener;
@@ -251,7 +250,7 @@ impl<A: Send + 'static> Cell<A> {
         B: Clone,
     {
         let self_ = self.clone();
-        let f_deps = lambda1_deps(&f);
+        let f_deps = f.deps();
         let f = Arc::new(Mutex::new(f));
         let init;
         {
@@ -288,7 +287,7 @@ impl<A: Send + 'static> Cell<A> {
         let lhs = self.sample_lazy();
         let rhs = cb.sample_lazy();
         let init: Lazy<C>;
-        let f_deps = lambda2_deps(&f);
+        let f_deps = f.deps();
         let f = Arc::new(Mutex::new(f));
         {
             let lhs = lhs.clone();
@@ -341,7 +340,7 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
-        let f_deps = lambda3_deps(&f);
+        let f_deps = f.deps();
         self.lift2(cb, |a: &A, b: &B| (a.clone(), b.clone())).lift2(
             cc,
             lambda2(
@@ -367,7 +366,7 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
-        let f_deps = lambda4_deps(&f);
+        let f_deps = f.deps();
         self.lift3(cb, cc, |a: &A, b: &B, c: &C| {
             (a.clone(), b.clone(), c.clone())
         })
@@ -398,7 +397,7 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
-        let f_deps = lambda5_deps(&f);
+        let f_deps = f.deps();
         self.lift3(cb, cc, |a: &A, b: &B, c: &C| {
             (a.clone(), b.clone(), c.clone())
         })
@@ -432,7 +431,7 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
-        let f_deps = lambda6_deps(&f);
+        let f_deps = f.deps();
         self.lift4(cb, cc, cd, |a: &A, b: &B, c: &C, d: &D| {
             (a.clone(), b.clone(), c.clone(), d.clone())
         })
