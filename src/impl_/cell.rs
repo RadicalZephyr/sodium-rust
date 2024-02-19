@@ -251,19 +251,17 @@ impl<A: Send + 'static> Cell<A> {
     {
         let self_ = self.clone();
         let f_deps = f.deps();
-        let f = Arc::new(Mutex::new(f));
+        let f = Arc::new(f);
         let init;
         {
             let f = f.clone();
             init = Lazy::new(move || {
-                let mut f = f.lock();
                 f.call(&self_.sample())
             });
         }
         self.updates()
             .map(lambda1(
                 move |a: &A| {
-                    let mut f = f.lock();
                     f.call(a)
                 },
                 f_deps,
@@ -274,7 +272,7 @@ impl<A: Send + 'static> Cell<A> {
     pub fn lift2<
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
-        FN: IsLambda2<A, B, C> + Send + 'static,
+        FN: IsLambda2<A, B, C> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -288,13 +286,12 @@ impl<A: Send + 'static> Cell<A> {
         let rhs = cb.sample_lazy();
         let init: Lazy<C>;
         let f_deps = f.deps();
-        let f = Arc::new(Mutex::new(f));
+        let f = Arc::new(f);
         {
             let lhs = lhs.clone();
             let rhs = rhs.clone();
             let f = f.clone();
             init = Lazy::new(move || {
-                let mut f = f.lock();
                 f.call(&lhs.run(), &rhs.run())
             });
         }
@@ -318,7 +315,6 @@ impl<A: Send + 'static> Cell<A> {
         let s = s1.or_else(&s2).map(lambda1(
             move |_: &()| {
                 let state2 = state.lock();
-                let mut f = f.lock();
                 f.call(&state2.0.run(), &state2.1.run())
             },
             f_deps,
@@ -330,12 +326,12 @@ impl<A: Send + 'static> Cell<A> {
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
-        FN: IsLambda3<A, B, C, D> + Send + 'static,
+        FN: IsLambda3<A, B, C, D> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<D>
     where
         A: Clone,
@@ -355,13 +351,13 @@ impl<A: Send + 'static> Cell<A> {
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
-        FN: IsLambda4<A, B, C, D, E> + Send + 'static,
+        FN: IsLambda4<A, B, C, D, E> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
         cd: &Cell<D>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<E>
     where
         A: Clone,
@@ -385,14 +381,14 @@ impl<A: Send + 'static> Cell<A> {
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
-        FN: IsLambda5<A, B, C, D, E, F> + Send + 'static,
+        FN: IsLambda5<A, B, C, D, E, F> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
         cd: &Cell<D>,
         ce: &Cell<E>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<F>
     where
         A: Clone,
@@ -418,7 +414,7 @@ impl<A: Send + 'static> Cell<A> {
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
         G: Send + Clone + 'static,
-        FN: IsLambda6<A, B, C, D, E, F, G> + Send + 'static,
+        FN: IsLambda6<A, B, C, D, E, F, G> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -426,7 +422,7 @@ impl<A: Send + 'static> Cell<A> {
         cd: &Cell<D>,
         ce: &Cell<E>,
         cf: &Cell<F>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<G>
     where
         A: Clone,
@@ -617,7 +613,7 @@ impl<A: Send + 'static> Cell<A> {
         .hold_lazy(Lazy::new(move || cca2.sample().sample()))
     }
 
-    pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener
+    pub fn listen_weak<K: Fn(&A) + Send + Sync + 'static>(&self, k: K) -> Listener
     where
         A: Clone,
     {

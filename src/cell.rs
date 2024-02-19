@@ -123,7 +123,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     pub fn lift2<
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: IsLambda2<A, B, C> + Send + 'static,
+        FN: IsLambda2<A, B, C> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -141,7 +141,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
-        FN: IsLambda3<A, B, C, D> + Send + 'static,
+        FN: IsLambda3<A, B, C, D> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -161,7 +161,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
-        FN: IsLambda4<A, B, C, D, E> + Send + 'static,
+        FN: IsLambda4<A, B, C, D, E> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -183,7 +183,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
-        FN: IsLambda5<A, B, C, D, E, F> + Send + 'static,
+        FN: IsLambda5<A, B, C, D, E, F> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -209,7 +209,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
         G: Clone + Send + 'static,
-        FN: IsLambda6<A, B, C, D, E, F, G> + Send + 'static,
+        FN: IsLambda6<A, B, C, D, E, F, G> + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -242,7 +242,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
 
     /// A variant of [`listen`][Cell::listen] that will deregister the
     /// listener automatically if the listener is garbage-collected.
-    pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: Fn(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         Listener {
             impl_: self.impl_.listen_weak(k),
         }

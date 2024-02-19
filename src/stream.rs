@@ -105,7 +105,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<D> {
         let mut deps = f.deps();
         let cc = cc.clone();
@@ -129,7 +129,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cb: &Cell<B>,
         cc: &Cell<C>,
         cd: &Cell<D>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<E> {
         let mut deps = f.deps();
         let cc = cc.clone();
@@ -160,7 +160,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cc: &Cell<C>,
         cd: &Cell<D>,
         ce: &Cell<E>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<F> {
         let mut deps = f.deps();
         let cc = cc.clone();
@@ -195,7 +195,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cd: &Cell<D>,
         ce: &Cell<E>,
         cf: &Cell<F>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<G> {
         let mut deps = f.deps();
         let cc = cc.clone();

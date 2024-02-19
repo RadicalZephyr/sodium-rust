@@ -250,7 +250,7 @@ impl<A: Send + 'static> Stream<A> {
     >(
         &self,
         cb: &Cell<B>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<C> {
         let cb = cb.clone();
         let mut f_deps = f.deps();
@@ -264,7 +264,7 @@ impl<A: Send + 'static> Stream<A> {
 
     pub fn map<B: Send + 'static, FN: IsLambda1<A, B> + Send + Sync + 'static>(
         &self,
-        mut f: FN,
+        f: FN,
     ) -> Stream<B> {
         let self_ = self.clone();
         let sodium_ctx = self.sodium_ctx();
@@ -290,7 +290,7 @@ impl<A: Send + 'static> Stream<A> {
 
     pub fn filter<PRED: IsLambda1<A, bool> + Send + Sync + 'static>(
         &self,
-        mut pred: PRED,
+        pred: PRED,
     ) -> Stream<A>
     where
         A: Clone,
@@ -328,7 +328,7 @@ impl<A: Send + 'static> Stream<A> {
     pub fn merge<FN: IsLambda2<A, A, A> + Send + Sync + 'static>(
         &self,
         s2: &Stream<A>,
-        mut f: FN,
+        f: FN,
     ) -> Stream<A>
     where
         A: Clone,
@@ -477,7 +477,7 @@ impl<A: Send + 'static> Stream<A> {
 
     pub fn _listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(
         &self,
-        mut k: K,
+        k: K,
         weak: bool,
     ) -> Listener {
         self.sodium_ctx().transaction(|| {
