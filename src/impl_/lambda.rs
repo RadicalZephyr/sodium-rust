@@ -7,6 +7,28 @@ pub struct Lambda<FN> {
     deps: Vec<Dep>,
 }
 
+pub trait Deps<T> {
+    fn deps(&self) -> Vec<Dep>;
+}
+
+impl<FN> Deps<()> for Lambda<FN> {
+    fn deps(&self) -> Vec<Dep> {
+        self.deps.clone()
+    }
+}
+
+impl<A, FN: Fn(&A)> Deps<A> for FN {
+    fn deps(&self) -> Vec<Dep> {
+        Vec::new()
+    }
+}
+
+impl<A, B, FN: Fn(&A) -> B> Deps<(A, B)> for FN {
+    fn deps(&self) -> Vec<Dep> {
+        Vec::new()
+    }
+}
+
 /// Interface for a lambda function of one argument.
 pub trait IsLambda1<A, B> {
     fn call(&self, a: &A) -> B;

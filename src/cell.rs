@@ -1,4 +1,5 @@
 use crate::impl_::cell::Cell as CellImpl;
+use crate::impl_::lambda::Deps;
 use crate::impl_::lambda::IsLambda1;
 use crate::impl_::lambda::IsLambda2;
 use crate::impl_::lambda::IsLambda3;
@@ -242,7 +243,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
 
     /// A variant of [`listen`][Cell::listen] that will deregister the
     /// listener automatically if the listener is garbage-collected.
-    pub fn listen_weak<K: Fn(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener {
         Listener {
             impl_: self.impl_.listen_weak(k),
         }
@@ -256,7 +257,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// This is an operational mechanism for interfacing between the
     /// world of I/O and FRP.
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener {
         Listener {
             impl_: self.impl_.listen(k),
         }

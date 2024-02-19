@@ -24,6 +24,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Weak;
 
+use super::lambda::Deps;
 use super::name::NodeName;
 use super::node::IsNodeExt;
 
@@ -613,7 +614,7 @@ impl<A: Send + 'static> Cell<A> {
         .hold_lazy(Lazy::new(move || cca2.sample().sample()))
     }
 
-    pub fn listen_weak<K: Fn(&A) + Send + Sync + 'static>(&self, k: K) -> Listener
+    pub fn listen_weak<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener
     where
         A: Clone,
     {
@@ -621,7 +622,7 @@ impl<A: Send + 'static> Cell<A> {
             .transaction(|| self.value().listen_weak(k))
     }
 
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener
+    pub fn listen<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener
     where
         A: Clone,
     {

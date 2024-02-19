@@ -375,7 +375,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// With [`listen`][Stream::listen] the listener is only
     /// deregistered if [`Listener::unlisten`] is called explicitly.
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         Listener {
             impl_: self.impl_.listen_weak(k),
         }
@@ -393,7 +393,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// handler should not block. It also is not allowed to use
     /// [`CellSink::send`][crate::CellSink::send] or
     /// [`StreamSink::send`][crate::StreamSink::send] in the handler.
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         Listener {
             impl_: self.impl_.listen(k),
         }

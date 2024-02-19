@@ -16,6 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Weak;
 
+use super::lambda::Deps;
 use super::name::NodeName;
 use super::node::IsNodeExt;
 
@@ -475,7 +476,7 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn _listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(
+    pub fn _listen<K: for<'a> FnMut(&'a A) + Deps<A> + Send + Sync + 'static>(
         &self,
         k: K,
         weak: bool,
@@ -489,7 +490,7 @@ impl<A: Send + 'static> Stream<A> {
                 move || {
                     self_.with_data(|data: &mut StreamData<A>| {
                         for firing in &data.firing_op {
-                            k.call(firing)
+                            k(firing)
                         }
                     });
                 },
@@ -501,11 +502,11 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener {
         self._listen(k, true)
     }
 
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Deps<A> + Send + Sync + 'static>(&self, k: K) -> Listener {
         self._listen(k, false)
     }
 
