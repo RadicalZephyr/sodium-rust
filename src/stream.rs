@@ -107,11 +107,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cc: &Cell<C>,
         mut f: FN,
     ) -> Stream<D> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
+        let mut deps = f.deps();
         let cc = cc.clone();
         deps.push(cc.to_dep());
         self.snapshot(
@@ -135,11 +131,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cd: &Cell<D>,
         mut f: FN,
     ) -> Stream<E> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
+        let mut deps = f.deps();
         let cc = cc.clone();
         let cd = cd.clone();
         deps.push(cc.to_dep());
@@ -170,11 +162,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         ce: &Cell<E>,
         mut f: FN,
     ) -> Stream<F> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
+        let mut deps = f.deps();
         let cc = cc.clone();
         let cd = cd.clone();
         let ce = ce.clone();
@@ -209,11 +197,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cf: &Cell<F>,
         mut f: FN,
     ) -> Stream<G> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
+        let mut deps = f.deps();
         let cc = cc.clone();
         let cd = cd.clone();
         let ce = ce.clone();
