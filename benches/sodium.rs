@@ -14,7 +14,7 @@ fn stream(c: &mut Criterion) {
                 .stream()
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -31,7 +31,7 @@ fn stream(c: &mut Criterion) {
                 .merge(&sb.stream(), |a: &u16, b: &u16| *a + *b)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 if v % 2 == 0 {
                     sa.send(black_box(v));
                 } else {
@@ -54,7 +54,7 @@ fn stream(c: &mut Criterion) {
                 .merge(&sc.stream(), |s: &u16, c: &u16| *s + *c)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 match v % 3 {
                     2 => sa.send(black_box(v)),
                     1 => sb.send(black_box(v)),
@@ -79,7 +79,7 @@ fn stream(c: &mut Criterion) {
                 .merge(&sd.stream(), |s: &u16, d: &u16| *s + *d)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 match v % 4 {
                     3 => sa.send(black_box(v)),
                     2 => sb.send(black_box(v)),
@@ -105,7 +105,7 @@ fn stream(c: &mut Criterion) {
                 .stream()
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sa.send(black_box(v));
             }
         })
@@ -126,7 +126,7 @@ fn stream(c: &mut Criterion) {
                 .stream()
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sa.send(black_box(v));
             }
         })
@@ -142,7 +142,7 @@ fn stream(c: &mut Criterion) {
                 .map(|v: &u16| *v + 10)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -159,7 +159,7 @@ fn stream(c: &mut Criterion) {
                 .map(|v: &u16| black_box(*v - 5))
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -177,7 +177,7 @@ fn stream(c: &mut Criterion) {
                 .map(|v: &u16| black_box(*v * 2))
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -193,7 +193,7 @@ fn stream(c: &mut Criterion) {
                 .filter(|v: &u16| *v % 3 == 0 && *v % 5 == 0)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -210,7 +210,7 @@ fn stream(c: &mut Criterion) {
                 .filter(|v: &u16| *v % 3 == 0 && *v % 5 == 0)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -228,7 +228,7 @@ fn stream(c: &mut Criterion) {
                 .map(|v: &u16| *v - 4)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -247,7 +247,7 @@ fn stream(c: &mut Criterion) {
                 .filter(|v: &u16| *v % 5 == 0)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
             }
         })
@@ -263,7 +263,7 @@ fn cell(c: &mut Criterion) {
             let sink = ctx.new_cell_sink(0_u16);
             let cell = sink.cell();
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
                 let s = black_box(cell.sample());
                 assert_eq!(v, s);
@@ -277,7 +277,7 @@ fn cell(c: &mut Criterion) {
             let sink = ctx.new_cell_sink(0_u16);
             let cell = sink.cell().map(|v: &u16| *v + 10);
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
                 let s = black_box(cell.sample());
                 assert_eq!(v + 10, s);
@@ -291,7 +291,7 @@ fn cell(c: &mut Criterion) {
             let sink = ctx.new_cell_sink(0_u16);
             let cell = sink.cell().map(|v: &u16| *v + 10).map(|v: &u16| *v - 5);
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
                 let s = black_box(cell.sample());
                 assert_eq!(v + 5, s);
@@ -309,7 +309,7 @@ fn cell(c: &mut Criterion) {
                 .map(|v: &u16| *v - 5)
                 .map(|v: &u16| *v + 2);
 
-            for v in 0_u16..1000 {
+            for v in 0_u16..4000 {
                 sink.send(black_box(v));
                 let s = black_box(cell.sample());
                 assert_eq!(v + 7, s);
@@ -333,7 +333,7 @@ fn snapshot(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sum_stream.listen(move |v: &u16| values.push(black_box(*v)));
 
-            for add in 1_u16..50 {
+            for add in 1_u16..40 {
                 for v in 0_u16..100 {
                     stream_sink.send(v);
                 }
@@ -357,7 +357,7 @@ fn snapshot(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sum_stream.listen(move |v: &u16| values.push(black_box(*v)));
 
-            for add in 1_u16..50 {
+            for add in 1_u16..40 {
                 for v in 0_u16..100 {
                     stream_sink.send(v);
                 }
@@ -387,7 +387,7 @@ fn snapshot(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sum_stream.listen(move |v: &u16| values.push(black_box(*v)));
 
-            for add in 1_u16..50 {
+            for add in 1_u16..40 {
                 for v in 0_u16..100 {
                     stream_sink.send(v);
                 }
@@ -419,7 +419,7 @@ fn snapshot(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sum_stream.listen(move |v: &u16| values.push(black_box(*v)));
 
-            for add in 1_u16..50 {
+            for add in 1_u16..40 {
                 for v in 0_u16..100 {
                     stream_sink.send(v);
                 }
@@ -454,7 +454,7 @@ fn snapshot(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sum_stream.listen(move |v: &u16| values.push(black_box(*v)));
 
-            for add in 1_u16..50 {
+            for add in 1_u16..40 {
                 for v in 0_u16..100 {
                     stream_sink.send(v);
                 }
