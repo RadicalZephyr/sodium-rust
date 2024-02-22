@@ -23,3 +23,7 @@ debug = 1
 [[bench]]
 name = "sodium"
 harness = false
+
+[[bench]]
+name = "graph-growth"
+harness = false
