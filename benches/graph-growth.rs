@@ -39,17 +39,28 @@ fn stream(c: &mut Criterion) {
                 let mut v = Vec::with_capacity(1024);
                 listeners.push(stream.listen(move |x: &u8| v.push(black_box(*x))));
             }
-            1.. => {
+            1 => {
+                let stream = stream.map(|x: &u8| black_box(*x));
+                let mut v = Vec::with_capacity(1024);
+                listeners.push(stream.listen(move |x: &u8| v.push(black_box(*x))));
+            }
+            2.. => {
                 // Add 1 node if e > 0
                 let stream = stream.map(|x: &u8| black_box(*x));
 
-                // Only create a tree of depth e-1, because a perfeect
+                // Only create a tree of depth e-2, because a perfeect
                 // binary tree has `2^(n+1) - 1` nodes, where `n` is
                 // the depth. With the +1 node from above, and a depth
-                // of `n = e - 1`, the number of nodes is `2^((e-1)+1) = 2^e`
-                let leaves = branch(e-1, stream);
+                // of `n = e - 2`, the number of maps nodes is
+                // `2^((e-2)+1) = 2^(e-1)`.  We then fill out the last
+                // layer of the tree with two listener nodes for each
+                // leaf map node, to get `2^e` nodes in total.
+                let leaves = branch(e-2, stream);
 
+                assert_eq!(nodes.div_euclid(4), leaves.len());
                 for leaf in leaves {
+                    let mut v = Vec::with_capacity(1024);
+                    listeners.push(leaf.listen(move |x: &u8| v.push(black_box(*x))));
                     let mut v = Vec::with_capacity(1024);
                     listeners.push(leaf.listen(move |x: &u8| v.push(black_box(*x))));
                 }
@@ -57,7 +68,6 @@ fn stream(c: &mut Criterion) {
             }
         }
 
-        assert_eq!(nodes.div_euclid(2), listeners.len());
         group.bench_with_input(BenchmarkId::new("Full Tree", nodes), &sink, |b, sink| {
             b.iter(|| sink.send(black_box(0)));
         });
