@@ -59,6 +59,9 @@ fn stream(c: &mut Criterion) {
 
                 assert_eq!(nodes.div_euclid(4), leaves.len());
                 for leaf in leaves {
+                    // TODO: Instead of using 2x listeners for each
+                    // leaf node, change the linear test to have the
+                    // same number of listeners as the full tree test.
                     let mut v = Vec::with_capacity(1024);
                     listeners.push(leaf.listen(move |x: &u8| v.push(black_box(*x))));
                     let mut v = Vec::with_capacity(1024);
