@@ -304,9 +304,9 @@ impl<A: Send + 'static> Stream<A> {
                 NodeName::STREAM_FILTER,
                 move || {
                     self_.with_firing_op(|firing_op: &mut Option<A>| {
-                        let firing_op2 = firing_op.clone().filter(|firing| pred.call(firing));
+                        let firing_op2 = firing_op.as_ref().filter(|firing| pred.call(firing));
                         if let Some(firing) = firing_op2 {
-                            s.unwrap()._send(firing);
+                            s.unwrap()._send(firing.clone());
                         }
                     });
                 },
