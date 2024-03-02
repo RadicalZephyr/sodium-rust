@@ -191,6 +191,10 @@ impl Drop for NodeData {
 }
 
 impl Node {
+    /// Create a new `Node`.
+    ///
+    /// Add a new Node to the Sodium graph, with the given name,
+    /// update fn and Node dependencies.
     pub fn new<UPDATE: FnMut() + Send + Sync + 'static>(
         sodium_ctx: &SodiumCtx,
         name: NodeName,
