@@ -318,6 +318,37 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
+    pub fn filter_map<B, FN: IsLambda1<A, Option<B>> + Send + Sync + 'static>(
+        &self,
+        mut f: FN,
+    ) -> Stream<B>
+    where
+        A: Clone,
+        B: Clone + Send + 'static,
+    {
+        let self_ = self.clone();
+        let sodium_ctx = self.sodium_ctx();
+        Stream::_new(&sodium_ctx, |s: StreamWeakForwardRef<B>| {
+            let pred_deps = lambda1_deps(&f);
+            let node = Node::new(
+                &sodium_ctx,
+                NodeName::STREAM_FILTER_MAP,
+                move || {
+                    self_.with_firing_op(|firing_op: &mut Option<A>| {
+                        let firing_op2 = firing_op.as_ref().and_then(|firing| f.call(firing));
+                        if let Some(firing) = firing_op2 {
+                            s.unwrap()._send(firing.clone());
+                        }
+                    });
+                },
+                vec![self.box_clone()],
+            );
+            node.add_update_dependencies(pred_deps);
+            node.add_update_dependencies(vec![self.to_dep()]);
+            node
+        })
+    }
+
     pub fn or_else(&self, s2: &Stream<A>) -> Stream<A>
     where
         A: Clone,

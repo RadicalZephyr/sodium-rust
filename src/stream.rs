@@ -264,6 +264,86 @@ impl<A: Clone + Send + 'static> Stream<A> {
         }
     }
 
+    /// Return a `Stream` that both filters and maps.
+    ///
+    /// Only outputs events for which the supplied closure returns
+    /// `Some(value)`.
+    ///
+    /// `filter_map` can be used to make chains of `filter` and `map`
+    /// more concise and performant. The example below shows how a
+    /// `map().filter().map()` can be shortened to a single call to
+    /// `filter_map`.
+    ///
+    /// [`filter`]: Stream::filter
+    /// [`map`]: Stream::map
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// # use std::sync::{Arc, Mutex};
+    /// # use sodium_rust::SodiumCtx;
+    /// #
+    /// let mut sodium_ctx = SodiumCtx::new();
+    /// let s = sodium_ctx.new_stream_sink();
+    /// let out = Arc::new(Mutex::new(Vec::new()));
+    /// let l = {
+    ///     let out = out.clone();
+    ///     s
+    ///         .stream()
+    ///         .filter_map(|a: &&'static str| a.parse().ok())
+    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    /// };
+    /// s.send("1");
+    /// s.send("two");
+    /// s.send("NaN");
+    /// s.send("four");
+    /// s.send("5");
+    ///
+    /// let out = out.lock().unwrap();
+    /// assert_eq!([1, 5], &out[..]);
+    /// l.unlisten();
+    /// ```
+    ///
+    /// Here's the same example, but with [`filter`] and [`map`]:
+    ///
+    /// ```
+    /// # use std::sync::{Arc, Mutex};
+    /// # use std::num::ParseIntError;
+    /// # use sodium_rust::SodiumCtx;
+    /// #
+    /// let mut sodium_ctx = SodiumCtx::new();
+    /// let s = sodium_ctx.new_stream_sink();
+    /// let out = Arc::new(Mutex::new(Vec::new()));
+    /// let l = {
+    ///     let out = out.clone();
+    ///     s
+    ///         .stream()
+    ///         .map(|a: &&'static str| a.parse())
+    ///         .filter(|a: &Result<i32, ParseIntError>| a.is_ok())
+    ///         .map(|a: &Result<i32, ParseIntError>| a.clone().unwrap())
+    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    /// };
+    /// s.send("1");
+    /// s.send("two");
+    /// s.send("NaN");
+    /// s.send("four");
+    /// s.send("5");
+    ///
+    /// let out = out.lock().unwrap();
+    /// assert_eq!([1, 5], &out[..]);
+    /// l.unlisten();
+    /// ```
+    pub fn filter_map<B: Send + Clone + 'static, FN: IsLambda1<A, Option<B>> + Send + Sync + 'static>(
+        &self,
+        f: FN,
+    ) -> Stream<B> {
+        Stream {
+            impl_: self.impl_.filter_map(f),
+        }
+    }
+
     /// Variant of [`merge`][Stream::merge] that merges two streams.
     ///
     /// In the case where two events are simultaneous (both in the

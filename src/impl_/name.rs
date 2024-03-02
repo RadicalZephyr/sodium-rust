@@ -22,6 +22,7 @@ impl NodeName {
     pub const STREAM_NEW_WITH_COALESCER: NodeName = NodeName::Stream(Stream::NewWithCoalescer);
     pub const STREAM_MAP: NodeName = NodeName::Stream(Stream::Map);
     pub const STREAM_FILTER: NodeName = NodeName::Stream(Stream::Filter);
+    pub const STREAM_FILTER_MAP: NodeName = NodeName::Stream(Stream::FilterMap);
     pub const STREAM_MERGE: NodeName = NodeName::Stream(Stream::Merge);
     pub const STREAM_ONCE: NodeName = NodeName::Stream(Stream::Once);
     pub const STREAM_LISTEN: NodeName = NodeName::Stream(Stream::Listen);
@@ -48,6 +49,7 @@ pub enum Stream {
     Once,
     Listen,
     LoopNew,
+    FilterMap,
 }
 
 impl Display for NodeName {
@@ -68,6 +70,7 @@ impl Display for NodeName {
             }
             NodeName::Stream(Stream::Map) => f.write_str("Stream::map"),
             NodeName::Stream(Stream::Filter) => f.write_str("Stream::filter"),
+            NodeName::Stream(Stream::FilterMap) => f.write_str("Stream::filter_map"),
             NodeName::Stream(Stream::Merge) => f.write_str("Stream::merge"),
             NodeName::Stream(Stream::Once) => f.write_str("Stream::once"),
             NodeName::Stream(Stream::Listen) => f.write_str("Stream::listen"),
