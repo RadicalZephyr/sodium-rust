@@ -30,8 +30,7 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
     /// values, removing the `Option` wrapper and discarding empty
     /// values.
     pub fn filter_option(&self) -> Stream<A> {
-        self.filter(|a: &Option<A>| a.is_some())
-            .map(|a: &Option<A>| a.clone().unwrap())
+        self.filter_map(|a: &Option<A>| a.clone())
     }
 }
 
