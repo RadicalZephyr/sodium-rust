@@ -1,6 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
-use sodium_rust::SodiumCtx;
+use sodium::SodiumCtx;
 
 fn stream(c: &mut Criterion) {
     let mut stream_send = c.benchmark_group("Stream::send");
