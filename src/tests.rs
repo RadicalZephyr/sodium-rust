@@ -1,6 +1,6 @@
 use crate::{lambda1, Cell, CellLoop, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
 
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, num::ParseIntError};
 
 mod mem_test;
 mod node_test;
@@ -1232,6 +1232,43 @@ fn split_opt() {
 
             let out_b = out_b.lock().unwrap();
             assert_eq!(1, *out_b);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+#[test]
+fn split_res() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out_a = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let out_b = Arc::new(Mutex::new(0_usize));
+
+        let s_init = sodium_ctx.new_stream_sink::<&'static str>();
+        let (s_a, s_b) = s_init.stream()
+            .map(|s: &&'static str| s.parse()).split_res();
+
+        let l_a;
+        let l_b;
+        {
+            let out_a = out_a.clone();
+            l_a = s_a.listen(move |x: &usize| out_a.lock().unwrap().push(*x));
+            let out_b = out_b.clone();
+            l_b = s_b.listen(move |_: &ParseIntError| *out_b.lock().unwrap() += 1);
+        }
+        s_init.send("1");
+        s_init.send("hello");
+        s_init.send("world");
+        s_init.send("5");
+        l_a.unlisten();
+        l_b.unlisten();
+        {
+            let out_a = out_a.lock().unwrap();
+            assert_eq!(vec![1, 5], *out_a);
+
+            let out_b = out_b.lock().unwrap();
+            assert_eq!(2, *out_b);
         }
     }
     assert_memory_freed(sodium_ctx);

@@ -45,6 +45,22 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
         (a, b)
     }
 }
+impl<T, E> Stream<Result<T, E>>
+where
+    T: Clone + Send + 'static,
+    E: Clone + Send + 'static,
+{
+    pub fn split_res(&self) -> (Stream<T>, Stream<E>) {
+        let (a, b) = self.impl_.split_enum2(|opt: &Result<T, E>| match opt {
+            Ok(val) => Enum2::A(val.clone()),
+            Err(e) => Enum2::B(e.clone()),
+        });
+
+        let a = Stream { impl_: a };
+        let b = Stream { impl_: b };
+        (a, b)
+    }
+}
 
 impl<
         A: Clone + Send + Sync + 'static,
