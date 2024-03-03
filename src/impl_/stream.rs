@@ -7,6 +7,7 @@ use crate::impl_::lazy::Lazy;
 use crate::impl_::listener::Listener;
 use crate::impl_::node::{box_clone_vec_is_node, IsNode, IsWeakNode, Node, WeakNode};
 use crate::impl_::sodium_ctx::SodiumCtx;
+use crate::impl_::sodium_ctx::SodiumCtxData;
 use crate::impl_::stream_loop::StreamLoop;
 use crate::impl_::stream_sink::StreamSink;
 
@@ -16,6 +17,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Weak;
 
+use super::enum_::Enum2;
 use super::name::NodeName;
 use super::node::IsNodeExt;
 
@@ -197,6 +199,12 @@ impl<A: Send + 'static> Stream<A> {
         }
     }
 
+    /// Construct a new Stream, allowing explicit control over the
+    /// construction of the underlying `Node`.
+    ///
+    /// The `mk_node` fn is a one-time use factory function, receives
+    /// a forward reference to the `Stream` this node will be
+    /// contained in.
     pub fn _new<MkNode: FnOnce(StreamWeakForwardRef<A>) -> Node>(
         sodium_ctx: &SodiumCtx,
         mk_node: MkNode,
@@ -304,9 +312,40 @@ impl<A: Send + 'static> Stream<A> {
                 NodeName::STREAM_FILTER,
                 move || {
                     self_.with_firing_op(|firing_op: &mut Option<A>| {
-                        let firing_op2 = firing_op.clone().filter(|firing| pred.call(firing));
+                        let firing_op2 = firing_op.as_ref().filter(|firing| pred.call(firing));
                         if let Some(firing) = firing_op2 {
-                            s.unwrap()._send(firing);
+                            s.unwrap()._send(firing.clone());
+                        }
+                    });
+                },
+                vec![self.box_clone()],
+            );
+            node.add_update_dependencies(pred_deps);
+            node.add_update_dependencies(vec![self.to_dep()]);
+            node
+        })
+    }
+
+    pub fn filter_map<B, FN: IsLambda1<A, Option<B>> + Send + Sync + 'static>(
+        &self,
+        mut f: FN,
+    ) -> Stream<B>
+    where
+        A: Clone,
+        B: Clone + Send + 'static,
+    {
+        let self_ = self.clone();
+        let sodium_ctx = self.sodium_ctx();
+        Stream::_new(&sodium_ctx, |s: StreamWeakForwardRef<B>| {
+            let pred_deps = lambda1_deps(&f);
+            let node = Node::new(
+                &sodium_ctx,
+                NodeName::STREAM_FILTER_MAP,
+                move || {
+                    self_.with_firing_op(|firing_op: &mut Option<A>| {
+                        let firing_op2 = firing_op.as_ref().and_then(|firing| f.call(firing));
+                        if let Some(firing) = firing_op2 {
+                            s.unwrap()._send(firing.clone());
                         }
                     });
                 },
@@ -546,6 +585,63 @@ impl<A: Send + 'static> Stream<A> {
             data: Arc::downgrade(&this.data),
             node: Node::downgrade2(&this.node),
         }
+    }
+}
+
+impl<A: Clone + Send + 'static> Stream<A> {
+    pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
+    where
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+    {
+        let sodium_ctx = self.sodium_ctx();
+        let sodium_ctx2 = sodium_ctx.clone();
+        let self_ = self.clone();
+
+        let sa: Stream<B> = Stream::new(&sodium_ctx);
+        let sb: Stream<C> = Stream::new(&sodium_ctx);
+
+        let node;
+        {
+            let weak_sa = Stream::downgrade(&sa);
+            let weak_sb = Stream::downgrade(&sb);
+
+            node = Node::new(
+                &sodium_ctx,
+                NodeName::Router,
+                move || {
+                    let firing_op = self_
+                        .with_firing_op(|firing_op: &mut Option<A>| firing_op.as_ref().map(&f));
+                    if let Some(dispatch) = firing_op {
+                        match dispatch {
+                            Enum2::A(a) => {
+                                if let Some(stream) = weak_sa.upgrade() {
+                                    stream._send(a.clone());
+                                    sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
+                                        data.changed_nodes.push(stream.box_clone());
+                                    });
+                                }
+                            }
+                            Enum2::B(b) => {
+                                if let Some(stream) = weak_sb.upgrade() {
+                                    stream._send(b.clone());
+                                    sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
+                                        data.changed_nodes.push(stream.box_clone());
+                                    });
+                                }
+                            }
+                        }
+                    }
+                },
+                vec![self.box_clone()],
+            );
+            node.add_update_dependencies(vec![self.to_dep()]);
+        };
+        sa.node().data().dependencies.write().push(node.box_clone());
+        sb.node().data().dependencies.write().push(node.box_clone());
+
+        (sa, sb)
     }
 }
 

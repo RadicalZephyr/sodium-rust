@@ -1,5 +1,6 @@
 use crate::cell::Cell;
 use crate::impl_::dep::Dep;
+use crate::impl_::enum_::Enum2;
 use crate::impl_::lambda::{lambda1, lambda2};
 use crate::impl_::lambda::{IsLambda1, IsLambda2, IsLambda3, IsLambda4, IsLambda5, IsLambda6};
 use crate::impl_::stream::Stream as StreamImpl;
@@ -30,8 +31,34 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
     /// values, removing the `Option` wrapper and discarding empty
     /// values.
     pub fn filter_option(&self) -> Stream<A> {
-        self.filter(|a: &Option<A>| a.is_some())
-            .map(|a: &Option<A>| a.clone().unwrap())
+        self.filter_map(|a: &Option<A>| a.clone())
+    }
+
+    pub fn split_opt(&self) -> (Stream<A>, Stream<()>) {
+        let (a, b) = self.impl_.split_enum2(|opt: &Option<A>| match opt {
+            Some(val) => Enum2::A(val.clone()),
+            None => Enum2::B(()),
+        });
+
+        let a = Stream { impl_: a };
+        let b = Stream { impl_: b };
+        (a, b)
+    }
+}
+impl<T, E> Stream<Result<T, E>>
+where
+    T: Clone + Send + 'static,
+    E: Clone + Send + 'static,
+{
+    pub fn split_res(&self) -> (Stream<T>, Stream<E>) {
+        let (a, b) = self.impl_.split_enum2(|opt: &Result<T, E>| match opt {
+            Ok(val) => Enum2::A(val.clone()),
+            Err(e) => Enum2::B(e.clone()),
+        });
+
+        let a = Stream { impl_: a };
+        let b = Stream { impl_: b };
+        (a, b)
     }
 }
 
@@ -261,6 +288,89 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ) -> Stream<A> {
         Stream {
             impl_: self.impl_.filter(pred),
+        }
+    }
+
+    /// Return a `Stream` that both filters and maps.
+    ///
+    /// Only outputs events for which the supplied closure returns
+    /// `Some(value)`.
+    ///
+    /// `filter_map` can be used to make chains of `filter` and `map`
+    /// more concise and performant. The example below shows how a
+    /// `map().filter().map()` can be shortened to a single call to
+    /// `filter_map`.
+    ///
+    /// [`filter`]: Stream::filter
+    /// [`map`]: Stream::map
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    ///
+    /// ```
+    /// # use std::sync::{Arc, Mutex};
+    /// # use sodium_rust::SodiumCtx;
+    /// #
+    /// let mut sodium_ctx = SodiumCtx::new();
+    /// let s = sodium_ctx.new_stream_sink();
+    /// let out = Arc::new(Mutex::new(Vec::new()));
+    /// let l = {
+    ///     let out = out.clone();
+    ///     s
+    ///         .stream()
+    ///         .filter_map(|a: &&'static str| a.parse().ok())
+    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    /// };
+    /// s.send("1");
+    /// s.send("two");
+    /// s.send("NaN");
+    /// s.send("four");
+    /// s.send("5");
+    ///
+    /// let out = out.lock().unwrap();
+    /// assert_eq!([1, 5], &out[..]);
+    /// l.unlisten();
+    /// ```
+    ///
+    /// Here's the same example, but with [`filter`] and [`map`]:
+    ///
+    /// ```
+    /// # use std::sync::{Arc, Mutex};
+    /// # use std::num::ParseIntError;
+    /// # use sodium_rust::SodiumCtx;
+    /// #
+    /// let mut sodium_ctx = SodiumCtx::new();
+    /// let s = sodium_ctx.new_stream_sink();
+    /// let out = Arc::new(Mutex::new(Vec::new()));
+    /// let l = {
+    ///     let out = out.clone();
+    ///     s
+    ///         .stream()
+    ///         .map(|a: &&'static str| a.parse())
+    ///         .filter(|a: &Result<i32, ParseIntError>| a.is_ok())
+    ///         .map(|a: &Result<i32, ParseIntError>| a.clone().unwrap())
+    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    /// };
+    /// s.send("1");
+    /// s.send("two");
+    /// s.send("NaN");
+    /// s.send("four");
+    /// s.send("5");
+    ///
+    /// let out = out.lock().unwrap();
+    /// assert_eq!([1, 5], &out[..]);
+    /// l.unlisten();
+    /// ```
+    pub fn filter_map<
+        B: Send + Clone + 'static,
+        FN: IsLambda1<A, Option<B>> + Send + Sync + 'static,
+    >(
+        &self,
+        f: FN,
+    ) -> Stream<B> {
+        Stream {
+            impl_: self.impl_.filter_map(f),
         }
     }
 

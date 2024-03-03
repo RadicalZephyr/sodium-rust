@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This CHANGELOG file.
 - Dependency on [parking-lot].
+- New `filter_map` combinator.
 
 [parking-lot]: https://crates.io/crates/parking-lot
 
