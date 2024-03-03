@@ -310,7 +310,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// ```
     /// # use std::sync::{Arc, Mutex};
-    /// # use sodium_rust::SodiumCtx;
+    /// # use sodium::SodiumCtx;
     /// #
     /// let mut sodium_ctx = SodiumCtx::new();
     /// let s = sodium_ctx.new_stream_sink();
@@ -338,7 +338,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// ```
     /// # use std::sync::{Arc, Mutex};
     /// # use std::num::ParseIntError;
-    /// # use sodium_rust::SodiumCtx;
+    /// # use sodium::SodiumCtx;
     /// #
     /// let mut sodium_ctx = SodiumCtx::new();
     /// let s = sodium_ctx.new_stream_sink();
