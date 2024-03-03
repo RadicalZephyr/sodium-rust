@@ -197,6 +197,12 @@ impl<A: Send + 'static> Stream<A> {
         }
     }
 
+    /// Construct a new Stream, allowing explicit control over the
+    /// construction of the underlying `Node`.
+    ///
+    /// The `mk_node` fn is a one-time use factory function, receives
+    /// a forward reference to the `Stream` this node will be
+    /// contained in.
     pub fn _new<MkNode: FnOnce(StreamWeakForwardRef<A>) -> Node>(
         sodium_ctx: &SodiumCtx,
         mk_node: MkNode,
