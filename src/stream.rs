@@ -1,5 +1,6 @@
 use crate::cell::Cell;
 use crate::impl_::dep::Dep;
+use crate::impl_::enum_::Enum2;
 use crate::impl_::lambda::{lambda1, lambda2};
 use crate::impl_::lambda::{IsLambda1, IsLambda2, IsLambda3, IsLambda4, IsLambda5, IsLambda6};
 use crate::impl_::stream::Stream as StreamImpl;
@@ -31,6 +32,17 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
     /// values.
     pub fn filter_option(&self) -> Stream<A> {
         self.filter_map(|a: &Option<A>| a.clone())
+    }
+
+    pub fn split_opt(&self) -> (Stream<A>, Stream<()>) {
+        let (a, b) = self.impl_.split_enum2(|opt: &Option<A>| match opt {
+            Some(val) => Enum2::A(val.clone()),
+            None => Enum2::B(()),
+        });
+
+        let a = Stream { impl_: a };
+        let b = Stream { impl_: b };
+        (a, b)
     }
 }
 
@@ -334,7 +346,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// assert_eq!([1, 5], &out[..]);
     /// l.unlisten();
     /// ```
-    pub fn filter_map<B: Send + Clone + 'static, FN: IsLambda1<A, Option<B>> + Send + Sync + 'static>(
+    pub fn filter_map<
+        B: Send + Clone + 'static,
+        FN: IsLambda1<A, Option<B>> + Send + Sync + 'static,
+    >(
         &self,
         f: FN,
     ) -> Stream<B> {

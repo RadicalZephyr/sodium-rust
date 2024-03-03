@@ -4,6 +4,7 @@ pub mod cell;
 pub mod cell_loop;
 pub mod cell_sink;
 pub mod dep;
+pub mod enum_;
 pub mod gc_node;
 pub mod lambda;
 pub mod lazy;
