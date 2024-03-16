@@ -1,6 +1,9 @@
 use crate::{lambda1, Cell, CellLoop, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
 
-use std::{sync::{Arc, Mutex}, num::ParseIntError};
+use std::{
+    num::ParseIntError,
+    sync::{Arc, Mutex},
+};
 
 mod mem_test;
 mod node_test;
@@ -1246,8 +1249,10 @@ fn split_res() {
         let out_b = Arc::new(Mutex::new(0_usize));
 
         let s_init = sodium_ctx.new_stream_sink::<&'static str>();
-        let (s_a, s_b) = s_init.stream()
-            .map(|s: &&'static str| s.parse()).split_res();
+        let (s_a, s_b) = s_init
+            .stream()
+            .map(|s: &&'static str| s.parse())
+            .split_res();
 
         let l_a;
         let l_b;
