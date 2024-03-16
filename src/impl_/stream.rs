@@ -590,6 +590,59 @@ impl<A: Send + 'static> Stream<A> {
 }
 
 impl<A: Clone + Send + 'static> Stream<A> {
+    pub fn split_filter<PRED: IsLambda1<A, bool> + Send + Sync + 'static>(
+        &self,
+        mut pred: PRED,
+    ) -> (Stream<A>, Stream<A>)
+    where
+        A: Clone,
+    {
+        let sodium_ctx = self.sodium_ctx();
+        let sodium_ctx2 = sodium_ctx.clone();
+        let self_ = self.clone();
+
+        let sa: Stream<A> = Stream::new(&sodium_ctx);
+        let sb: Stream<A> = Stream::new(&sodium_ctx);
+
+        let node;
+        {
+            let weak_sa = Stream::downgrade(&sa);
+            let weak_sb = Stream::downgrade(&sb);
+
+            node = Node::new(
+                &sodium_ctx,
+                NodeName::Router,
+                move || {
+                    self_.with_firing_op(|firing_op: &mut Option<A>| {
+                        if let Some(firing) = firing_op.as_ref() {
+                            if pred.call(firing) {
+                                if let Some(stream) = weak_sa.upgrade() {
+                                    stream._send(firing.clone());
+                                    sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
+                                        data.changed_nodes.push(stream.box_clone());
+                                    });
+                                }
+                            } else {
+                                if let Some(stream) = weak_sb.upgrade() {
+                                    stream._send(firing.clone());
+                                    sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
+                                        data.changed_nodes.push(stream.box_clone());
+                                    });
+                                }
+                            }
+                        }
+                    });
+                },
+                vec![self.box_clone()],
+            );
+            node.add_update_dependencies(vec![self.to_dep()]);
+        };
+        sa.node().data().dependencies.write().push(node.box_clone());
+        sb.node().data().dependencies.write().push(node.box_clone());
+
+        (sa, sb)
+    }
+
     pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
     where
         B: Clone + Send + 'static,
