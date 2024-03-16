@@ -50,6 +50,7 @@ pub use self::stream::Stream;
 pub use self::stream_loop::StreamLoop;
 pub use self::stream_sink::StreamSink;
 pub use self::transaction::Transaction;
-
+pub use self::impl_::enum_::Enum2;
+pub use self::impl_::enum_::Enum3;
 #[cfg(test)]
 mod tests;
