@@ -1,6 +1,6 @@
 [package]
 name = "sodium"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Clinton Selke <clinuxrulz@gmail.com>", "Zefira Shannon <zefira@hey.com>"]
 edition = "2021"
 license = "BSD-3-Clause"
