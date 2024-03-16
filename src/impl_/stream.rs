@@ -618,7 +618,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                         match dispatch {
                             Enum2::A(a) => {
                                 if let Some(stream) = weak_sa.upgrade() {
-                                    stream._send(a.clone());
+                                    stream._send(a);
                                     sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
                                         data.changed_nodes.push(stream.box_clone());
                                     });
@@ -626,7 +626,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                             }
                             Enum2::B(b) => {
                                 if let Some(stream) = weak_sb.upgrade() {
-                                    stream._send(b.clone());
+                                    stream._send(b);
                                     sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
                                         data.changed_nodes.push(stream.box_clone());
                                     });
@@ -676,7 +676,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                         match dispatch {
                             Enum3::A(a) => {
                                 if let Some(stream) = weak_sa.upgrade() {
-                                    stream._send(a.clone());
+                                    stream._send(a);
                                     sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
                                         data.changed_nodes.push(stream.box_clone());
                                     });
@@ -684,7 +684,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                             }
                             Enum3::B(b) => {
                                 if let Some(stream) = weak_sb.upgrade() {
-                                    stream._send(b.clone());
+                                    stream._send(b);
                                     sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
                                         data.changed_nodes.push(stream.box_clone());
                                     });
@@ -692,7 +692,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                             }
                             Enum3::C(c) => {
                                 if let Some(stream) = weak_sc.upgrade() {
-                                    stream._send(c.clone());
+                                    stream._send(c);
                                     sodium_ctx2.with_data(|data: &mut SodiumCtxData| {
                                         data.changed_nodes.push(stream.box_clone());
                                     });
