@@ -1,6 +1,6 @@
 use crate::cell::Cell;
 use crate::impl_::dep::Dep;
-use crate::impl_::enum_::Enum2;
+use crate::impl_::enum_::{Enum2, Enum3};
 use crate::impl_::lambda::{lambda1, lambda2};
 use crate::impl_::lambda::{IsLambda1, IsLambda2, IsLambda3, IsLambda4, IsLambda5, IsLambda6};
 use crate::impl_::stream::Stream as StreamImpl;
@@ -26,6 +26,36 @@ impl<A> Clone for Stream<A> {
     }
 }
 
+impl<A: Clone + Send + 'static> Stream<A> {
+    pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
+    where
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+    {
+        let (b, c) = self.impl_.split_enum2(f);
+
+        let b = Stream { impl_: b };
+        let c = Stream { impl_: c };
+        (b, c)
+    }
+
+    pub fn split_enum3<B, C, D, FN>(&self, f: FN) -> (Stream<B>, Stream<C>, Stream<D>)
+    where
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
+    {
+        let (b, c, d) = self.impl_.split_enum3(f);
+
+        let b = Stream { impl_: b };
+        let c = Stream { impl_: c };
+        let d = Stream { impl_: d };
+        (b, c, d)
+    }
+}
+
 impl<A: Clone + Send + 'static> Stream<Option<A>> {
     /// Return a `Stream` that only outputs events that have present
     /// values, removing the `Option` wrapper and discarding empty
@@ -45,6 +75,7 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
         (a, b)
     }
 }
+
 impl<T, E> Stream<Result<T, E>>
 where
     T: Clone + Send + 'static,
