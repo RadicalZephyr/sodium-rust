@@ -17,7 +17,6 @@ mod transaction;
 pub use self::cell::Cell;
 pub use self::cell_loop::CellLoop;
 pub use self::cell_sink::CellSink;
-#[doc(hidden)]
 pub use self::impl_::dep::Dep;
 pub use self::impl_::enum_::Enum2;
 pub use self::impl_::enum_::Enum3;
@@ -33,11 +32,17 @@ pub use self::impl_::lambda::lambda4;
 pub use self::impl_::lambda::lambda5;
 #[doc(hidden)]
 pub use self::impl_::lambda::lambda6;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda1;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda2;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda3;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda4;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda5;
+#[doc(hidden)]
 pub use self::impl_::lambda::IsLambda6;
 #[doc(hidden)]
 pub use self::impl_::lambda::Lambda;

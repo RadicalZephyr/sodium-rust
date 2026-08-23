@@ -1,81 +1,67 @@
-//! Demonstrates an ergonomics problem in the public Sodium API: closures
-//! passed to combinators cannot have their argument type inferred, so every
-//! call site has to carry a type annotation on the closure parameter.
+//! Guards the closure ergonomics of the public Sodium API.
 //!
-//! The minimum annotation that works is a *partial* one naming only the
-//! reference-ness of the argument:
-//!
-//! ```ignore
-//! stream.map(|a: &_| *a + 1)
-//! ```
-//!
-//! while the natural spelling fails to compile:
+//! Every combinator here is bounded on `FnMut`/`Fn` directly, so closure
+//! arguments infer and call sites read the way they should:
 //!
 //! ```ignore
 //! stream.map(|a| *a + 1)
-//! // error[E0282]: type annotations needed
 //! ```
 //!
-//! This is surprising because the element type is already fully determined:
-//! `map` is called on a `Stream<i32>`, so there is only one type the argument
-//! could possibly have.
+//! This was not always true. The combinators used to be bounded on the
+//! `IsLambda1`..`IsLambda6` traits, and every closure passed to the API needed
+//! its parameter annotated -- at minimum `|a: &_|`, sometimes the full `|a: &i32|`
+//! -- because rustc's closure signature deduction does not look through a
+//! user-defined trait. See `THEORY` at the bottom of this file for the full
+//! diagnosis, which the `compile_fail` module below keeps honest.
 //!
-//! The tests below are in three parts:
+//! The tests are in three parts:
 //!
-//! * `annotated_*` — the API as it must be written today. These compile, and
-//!   exist to pin down exactly how much annotation is required.
-//! * `fnmut_bound_*` — the handful of methods that are bounded on `FnMut`
-//!   rather than `IsLambda1`. These infer with no annotation at all, which
-//!   isolates the trait bound as the variable that matters.
-//! * `compile_fail` — invokes `rustc` on standalone snippets to *verify* that
-//!   the unannotated forms really are rejected, and to reduce the failure to a
-//!   minimal local trait that has nothing to do with FRP.
-//!
-//! See `THEORY` at the bottom of this file for the diagnosis.
+//! * `infers_*` -- the API exercised with bare, unannotated closures. These are
+//!   the regression guard: if a combinator is ever moved back onto an
+//!   `IsLambda`-style bound, they stop compiling.
+//! * `with_deps_*` -- the `*_with_deps` siblings, which take an explicit
+//!   `Vec<Dep>` for the rare case where a closure captures FRP nodes that
+//!   Sodium cannot see.
+//! * `compile_fail` -- drives `rustc` over standalone snippets to verify the
+//!   inference claim, and reduces the *old* failure to a minimal local trait so
+//!   the reasoning behind the current design stays recorded.
 
-use sodium::{Cell, Listener, SodiumCtx, Stream};
+use sodium::{Cell, Dep, Listener, SodiumCtx, Stream};
 use std::sync::{Arc, Mutex};
 
 /// Test scaffolding: drain a stream into a vector.
-///
-/// The closure here is fully annotated on purpose -- this helper is
-/// infrastructure, not part of what is being demonstrated.
 fn collect<A: Clone + Send + 'static>(s: &Stream<A>) -> (Arc<Mutex<Vec<A>>>, Listener) {
     let out: Arc<Mutex<Vec<A>>> = Default::default();
     let sunk = out.clone();
-    let l = s.listen(move |a: &A| sunk.lock().unwrap().push(a.clone()));
+    let l = s.listen(move |a| sunk.lock().unwrap().push(a.clone()));
     (out, l)
 }
 
 // ---------------------------------------------------------------------------
-// Part 1: what the API costs today.
+// Part 1: bare closures, no annotations.
 //
-// Every closure below needs `: &_` (or a fuller annotation). Deleting the
-// annotation from any one of them is a compile error; `compile_fail::` below
-// proves it for a representative sample.
+// Not one closure below names its argument type. Each of these is a live
+// assertion that the corresponding method is bounded on `FnMut`/`Fn`.
 // ---------------------------------------------------------------------------
 
 #[test]
-fn annotated_stream_combinators() {
+fn infers_stream_combinators() {
     let ctx = SodiumCtx::new();
     let sink = ctx.new_stream_sink::<i32>();
     let s: Stream<i32> = sink.stream();
 
-    // `|a| *a + 1` => error[E0282]
-    let mapped = s.map(|a: &_| *a + 1);
-    // `|a| *a % 2 == 0` => error[E0282]
-    let filtered = s.filter(|a: &_| *a % 2 == 0);
-    // `|a| if *a > 2 { Some(*a) } else { None }` => error[E0282]
-    let filter_mapped = s.filter_map(|a: &_| if *a > 2 { Some(*a) } else { None });
-    // `|a, b| *a + *b` => error[E0282]
-    let merged = s.merge(&mapped, |a: &_, b: &_| *a + *b);
-    // `|a, total| *a + *total` => error[E0282]
-    let accumulated = s.accum(0, |a: &_, total: &_| *a + *total);
+    let mapped = s.map(|a| *a + 1);
+    let filtered = s.filter(|a| *a % 2 == 0);
+    let filter_mapped = s.filter_map(|a| if *a > 2 { Some(*a) } else { None });
+    let merged = s.merge(&mapped, |a, b| *a + *b);
+    let accumulated = s.accum(0, |a, total| *a + *total);
+    let collected = s.collect(0, |a, total| (*a * 10, *a + *total));
 
     let (mapped_out, l1) = collect(&mapped);
     let (filtered_out, l2) = collect(&filtered);
     let (filter_mapped_out, l3) = collect(&filter_mapped);
     let (merged_out, l4) = collect(&merged);
+    let (collected_out, l5) = collect(&collected);
 
     sink.send(4);
     sink.send(1);
@@ -83,94 +69,143 @@ fn annotated_stream_combinators() {
     assert_eq!(*mapped_out.lock().unwrap(), vec![5, 2]);
     assert_eq!(*filtered_out.lock().unwrap(), vec![4]);
     assert_eq!(*filter_mapped_out.lock().unwrap(), vec![4]);
-    // Simultaneous firings of `s` and `mapped` are combined by the merge fn.
+    // `s` and `mapped` fire simultaneously, so the merge fn combines them.
     assert_eq!(*merged_out.lock().unwrap(), vec![9, 3]);
+    assert_eq!(*collected_out.lock().unwrap(), vec![40, 10]);
     assert_eq!(accumulated.sample(), 5);
+
+    for l in [l1, l2, l3, l4, l5] {
+        l.unlisten();
+    }
+}
+
+#[test]
+fn infers_stream_snapshots() {
+    let ctx = SodiumCtx::new();
+    let sink = ctx.new_stream_sink::<i32>();
+    let s = sink.stream();
+
+    let cb = ctx.new_cell_sink(10i32);
+    let cc = ctx.new_cell_sink(100i32);
+    let cd = ctx.new_cell_sink(1000i32);
+    let ce = ctx.new_cell_sink(10_000i32);
+    let cf = ctx.new_cell_sink(100_000i32);
+
+    let s2 = s.snapshot(&cb.cell(), |a, b| *a + *b);
+    let s3 = s.snapshot3(&cb.cell(), &cc.cell(), |a, b, c| *a + *b + *c);
+    let s4 = s.snapshot4(&cb.cell(), &cc.cell(), &cd.cell(), |a, b, c, d| {
+        *a + *b + *c + *d
+    });
+    let s5 = s.snapshot5(
+        &cb.cell(),
+        &cc.cell(),
+        &cd.cell(),
+        &ce.cell(),
+        |a, b, c, d, e| *a + *b + *c + *d + *e,
+    );
+    let s6 = s.snapshot6(
+        &cb.cell(),
+        &cc.cell(),
+        &cd.cell(),
+        &ce.cell(),
+        &cf.cell(),
+        |a, b, c, d, e, f| *a + *b + *c + *d + *e + *f,
+    );
+
+    let (o2, l2) = collect(&s2);
+    let (o3, l3) = collect(&s3);
+    let (o4, l4) = collect(&s4);
+    let (o5, l5) = collect(&s5);
+    let (o6, l6) = collect(&s6);
+
+    sink.send(1);
+
+    assert_eq!(*o2.lock().unwrap(), vec![11]);
+    assert_eq!(*o3.lock().unwrap(), vec![111]);
+    assert_eq!(*o4.lock().unwrap(), vec![1111]);
+    assert_eq!(*o5.lock().unwrap(), vec![11111]);
+    assert_eq!(*o6.lock().unwrap(), vec![111111]);
+
+    for l in [l2, l3, l4, l5, l6] {
+        l.unlisten();
+    }
+}
+
+#[test]
+fn infers_cell_combinators() {
+    let ctx = SodiumCtx::new();
+    let a = ctx.new_cell_sink(1i32).cell();
+    let b = ctx.new_cell_sink(10i32).cell();
+    let c = ctx.new_cell_sink(100i32).cell();
+    let d = ctx.new_cell_sink(1000i32).cell();
+    let e = ctx.new_cell_sink(10_000i32).cell();
+    let f = ctx.new_cell_sink(100_000i32).cell();
+
+    let mapped = a.map(|x| *x * 2);
+    let l2 = a.lift2(&b, |x, y| *x + *y);
+    let l3 = a.lift3(&b, &c, |x, y, z| *x + *y + *z);
+    let l4 = a.lift4(&b, &c, &d, |w, x, y, z| *w + *x + *y + *z);
+    let l5 = a.lift5(&b, &c, &d, &e, |v, w, x, y, z| *v + *w + *x + *y + *z);
+    let l6 = a.lift6(&b, &c, &d, &e, &f, |u, v, w, x, y, z| {
+        *u + *v + *w + *x + *y + *z
+    });
+
+    assert_eq!(mapped.sample(), 2);
+    assert_eq!(l2.sample(), 11);
+    assert_eq!(l3.sample(), 111);
+    assert_eq!(l4.sample(), 1111);
+    assert_eq!(l5.sample(), 11111);
+    assert_eq!(l6.sample(), 111111);
+}
+
+/// Both listener flavours, on both `Stream` and `Cell`, take bare closures.
+#[test]
+fn infers_listeners() {
+    let ctx = SodiumCtx::new();
+    let sink = ctx.new_stream_sink::<i32>();
+    let cs = ctx.new_cell_sink(1i32);
+
+    let seen: Arc<Mutex<Vec<i32>>> = Default::default();
+
+    let sunk = seen.clone();
+    let l1 = sink.stream().listen(move |a| sunk.lock().unwrap().push(*a));
+    let sunk = seen.clone();
+    let l2 = sink
+        .stream()
+        .listen_weak(move |a| sunk.lock().unwrap().push(*a * 2));
+    let sunk = seen.clone();
+    let l3 = cs
+        .cell()
+        .listen(move |a| sunk.lock().unwrap().push(*a * 100));
+    let sunk = seen.clone();
+    let l4 = cs
+        .cell()
+        .listen_weak(move |a| sunk.lock().unwrap().push(*a * 1000));
+
+    seen.lock().unwrap().clear();
+    sink.send(3);
+    let mut got = seen.lock().unwrap().clone();
+    got.sort_unstable();
+    assert_eq!(got, vec![3, 6]);
 
     for l in [l1, l2, l3, l4] {
         l.unlisten();
     }
 }
 
+/// A closure body that would previously have needed the *full* `&i32` rather
+/// than just `&_`, because the body only constrains an associated type of the
+/// argument (`<?U as Neg>::Output`). It now needs nothing.
 #[test]
-fn annotated_cell_combinators() {
-    let ctx = SodiumCtx::new();
-    let ca = ctx.new_cell_sink(2i32);
-    let cb = ctx.new_cell_sink(3i32);
-    let a: Cell<i32> = ca.cell();
-    let b: Cell<i32> = cb.cell();
-
-    // `|x| *x * 10` => error[E0282]
-    let mapped = a.map(|x: &_| *x * 10);
-    // `|x, y| *x + *y` => error[E0282]
-    let lifted = a.lift2(&b, |x: &_, y: &_| *x + *y);
-
-    assert_eq!(mapped.sample(), 20);
-    assert_eq!(lifted.sample(), 5);
-
-    ca.send(7);
-    assert_eq!(mapped.sample(), 70);
-    assert_eq!(lifted.sample(), 10);
-}
-
-#[test]
-fn annotated_snapshot() {
-    let ctx = SodiumCtx::new();
-    let sink = ctx.new_stream_sink::<i32>();
-    let cell = ctx.new_cell_sink(10i32);
-
-    // `|a, c| *a + *c` => error[E0282]
-    let snapped = sink.stream().snapshot(&cell.cell(), |a: &_, c: &_| *a + *c);
-    let (out, l) = collect(&snapped);
-
-    sink.send(5);
-    assert_eq!(*out.lock().unwrap(), vec![15]);
-
-    l.unlisten();
-}
-
-/// The annotation is required even when the closure body would pin the type
-/// down on its own. Here `push` onto a `Vec<i32>` leaves the compiler no
-/// freedom at all about what `a` is, and it still will not infer it.
-#[test]
-fn annotated_even_when_body_is_unambiguous() {
+fn infers_even_when_body_only_constrains_an_associated_type() {
     let ctx = SodiumCtx::new();
     let sink = ctx.new_stream_sink::<i32>();
 
     let seen: Arc<Mutex<Vec<i32>>> = Default::default();
     let sunk = seen.clone();
-
-    // `|a| sunk.lock().unwrap().push(*a)` => error[E0282], despite `sunk`
-    // holding a `Vec<i32>` and the stream being a `Stream<i32>`.
     let l = sink
         .stream()
-        .listen(move |a: &_| sunk.lock().unwrap().push(*a));
-
-    sink.send(7);
-    assert_eq!(*seen.lock().unwrap(), vec![7]);
-    l.unlisten();
-}
-
-/// `&_` is the *minimum* annotation, but it is not always sufficient.
-///
-/// `&_` gives the compiler the reference shape and leaves the referent open, to
-/// be filled in later by trait selection. That works as long as the closure body
-/// constrains the referent directly. When the body only constrains an
-/// *associated type* of it -- here `<?U as Neg>::Output == i32`, which does not
-/// determine `?U` -- the referent stays ambiguous and the full type is required.
-#[test]
-fn ref_underscore_is_not_always_enough() {
-    let ctx = SodiumCtx::new();
-    let sink = ctx.new_stream_sink::<i32>();
-
-    let seen: Arc<Mutex<Vec<i32>>> = Default::default();
-    let sunk = seen.clone();
-
-    // `|a: &_| sunk.lock().unwrap().push(-*a)` => error[E0282]. The negation is
-    // the only difference from the test above; `&i32` is needed here.
-    let l = sink
-        .stream()
-        .listen(move |a: &i32| sunk.lock().unwrap().push(-*a));
+        .listen(move |a| sunk.lock().unwrap().push(-*a));
 
     sink.send(7);
     assert_eq!(*seen.lock().unwrap(), vec![-7]);
@@ -178,65 +213,119 @@ fn ref_underscore_is_not_always_enough() {
 }
 
 // ---------------------------------------------------------------------------
-// Part 2: the contrast case.
+// Part 2: the `*_with_deps` siblings.
 //
-// A few methods in this crate are bounded directly on `FnMut`/`Fn` instead of
-// `IsLambda1`. Those infer with no annotation whatsoever. The two spellings sit
-// side by side on `Cell`: `listen` is `IsLambda1<A, ()>` and needs `: &_`,
-// while `listen_weak` is `FnMut(&A)` and does not.
+// Sodium builds its dependency graph from the shape of the network, which it
+// cannot see inside a closure. When a closure captures FRP nodes and reaches
+// them at call time, those nodes have to be declared explicitly. That is what
+// `*_with_deps` is for -- and it is the only reason the `IsLambda` traits
+// existed in the first place.
 // ---------------------------------------------------------------------------
 
+/// The motivating case: a `Cell<Cell<A>>` built by a closure that picks between
+/// two captured cells. Neither `ca` nor `cb` appears in the network shape, so
+/// both must be declared as dependencies for `switch_c` to track them.
 #[test]
-fn fnmut_bound_methods_infer_with_no_annotation() {
+fn with_deps_tracks_cells_captured_by_a_closure() {
     let ctx = SodiumCtx::new();
-    let cs = ctx.new_cell_sink(1i32);
-    let cell = cs.cell();
 
-    let seen: Arc<Mutex<Vec<i32>>> = Default::default();
-    let sunk = seen.clone();
+    let sa = ctx.new_stream_sink::<&'static str>();
+    let sb = ctx.new_stream_sink::<&'static str>();
+    let ssw = ctx.new_stream_sink::<&'static str>();
 
-    // `Cell::listen_weak` is bounded `K: FnMut(&A)`. No annotation needed --
-    // and note this is the *same closure shape* rejected in Part 1.
-    let l = cell.listen_weak(move |a| sunk.lock().unwrap().push(*a));
+    let ca = sa.stream().hold("a0");
+    let cb = sb.stream().hold("b0");
+    let csw_str = ssw.stream().hold("ca");
 
-    cs.send(2);
-    assert_eq!(*seen.lock().unwrap(), vec![1, 2]);
+    let deps: Vec<Dep> = vec![ca.to_dep(), cb.to_dep()];
+    // Note the closure is still bare -- `*_with_deps` infers too.
+    let csw = csw_str.map_with_deps(
+        move |sw| if *sw == "ca" { ca.clone() } else { cb.clone() },
+        deps,
+    );
 
+    let out = Cell::switch_c(&csw);
+    let (seen, l) = collect(&out.updates());
+
+    sa.send("a1"); // ca = "a1", currently selected
+    ssw.send("cb"); // switch to cb, which is holding "b0"
+    sb.send("b1"); // cb = "b1"
+    ssw.send("ca"); // switch back to ca, still holding "a1"
+    sa.send("a2"); // ca = "a2"
+
+    assert_eq!(*seen.lock().unwrap(), vec!["a1", "b0", "b1", "a1", "a2"]);
     l.unlisten();
 }
 
+/// The `*_with_deps` variants exist across the API and all take bare closures.
+///
+/// Each closure below genuinely captures `bias` and samples it -- which is the
+/// whole point of the mechanism. A `Dep` asserts to the garbage collector that
+/// the closure holds a reference to that node, so declaring one the closure does
+/// not actually capture corrupts the graph's ref counting.
 #[test]
-fn fn_bound_split_enum_infers_with_no_annotation() {
-    use sodium::Enum2;
-
+fn with_deps_variants_infer_too() {
     let ctx = SodiumCtx::new();
     let sink = ctx.new_stream_sink::<i32>();
+    let s = sink.stream();
 
-    // `split_enum2` is bounded `FN: Fn(&A) -> Enum2<B, C>`. `a` infers with no
-    // annotation at all.
-    let (evens, odds) = sink.stream().split_enum2(|a| {
-        if *a % 2 == 0 {
-            Enum2::A(*a)
-        } else {
-            Enum2::B(*a)
-        }
-    });
+    let bias = ctx.new_cell_sink(100i32).cell();
+    let cb = ctx.new_cell_sink(10i32).cell();
+    let a = ctx.new_cell_sink(1i32).cell();
 
-    let (evens_out, l1) = collect(&evens);
-    let (odds_out, l2) = collect(&odds);
+    let b = bias.clone();
+    let mapped = s.map_with_deps(move |x| *x + b.sample(), vec![bias.to_dep()]);
 
-    sink.send(4);
-    sink.send(5);
+    let b = bias.clone();
+    let filtered = s.filter_with_deps(move |x| *x < b.sample(), vec![bias.to_dep()]);
 
-    assert_eq!(*evens_out.lock().unwrap(), vec![4]);
-    assert_eq!(*odds_out.lock().unwrap(), vec![5]);
+    let b = bias.clone();
+    let filter_mapped = s.filter_map_with_deps(move |x| Some(*x * b.sample()), vec![bias.to_dep()]);
 
-    l1.unlisten();
-    l2.unlisten();
+    let b = bias.clone();
+    let merged = s.merge_with_deps(
+        &mapped,
+        move |x, y| *x + *y + b.sample(),
+        vec![bias.to_dep()],
+    );
+
+    let b = bias.clone();
+    let snapped = s.snapshot_with_deps(&cb, move |x, y| *x + *y + b.sample(), vec![bias.to_dep()]);
+
+    let b = bias.clone();
+    let accumulated = s.accum_with_deps(0, move |x, t| *x + *t + b.sample(), vec![bias.to_dep()]);
+
+    let b = bias.clone();
+    let cell_mapped = a.map_with_deps(move |x| *x + b.sample(), vec![bias.to_dep()]);
+
+    let b = bias.clone();
+    let lifted = a.lift2_with_deps(&cb, move |x, y| *x + *y + b.sample(), vec![bias.to_dep()]);
+
+    let (m, l1) = collect(&mapped);
+    let (fi, l2) = collect(&filtered);
+    let (fm, l3) = collect(&filter_mapped);
+    let (mg, l4) = collect(&merged);
+    let (sn, l5) = collect(&snapped);
+
+    sink.send(2);
+
+    assert_eq!(*m.lock().unwrap(), vec![102]);
+    assert_eq!(*fi.lock().unwrap(), vec![2]);
+    assert_eq!(*fm.lock().unwrap(), vec![200]);
+    // `s` fires 2 and `mapped` fires 102 in the same transaction.
+    assert_eq!(*mg.lock().unwrap(), vec![204]);
+    assert_eq!(*sn.lock().unwrap(), vec![112]);
+    assert_eq!(accumulated.sample(), 102);
+    assert_eq!(cell_mapped.sample(), 101);
+    assert_eq!(lifted.sample(), 111);
+
+    for l in [l1, l2, l3, l4, l5] {
+        l.unlisten();
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Part 3: verify the failure, and reduce it.
+// Part 3: verify the claim, and keep the reasoning on file.
 //
 // `cargo test` cannot contain code that fails to compile, so these tests drive
 // `rustc` over standalone snippets and assert on the outcome.
@@ -313,93 +402,59 @@ mod compile_fail {
         dir
     }
 
-    /// The headline result: an unannotated closure is rejected by `Stream::map`
-    /// with E0282, and adding nothing but `: &_` makes it compile.
+    /// The headline guarantee, checked from outside the crate: a chain of bare
+    /// closures compiles.
+    ///
+    /// Part 1 covers this too, but only as this crate's own integration test.
+    /// Compiling a standalone crate against the built rlib checks it the way a
+    /// downstream user would hit it.
     #[test]
-    fn unannotated_closure_is_rejected_but_ref_underscore_compiles() {
-        let dir = scratch("stream-map");
+    fn downstream_crate_can_use_bare_closures() {
+        let dir = scratch("downstream");
 
-        let broken = r#"
-            pub fn f(s: sodium::Stream<i32>) -> sodium::Stream<i32> {
+        let source = r#"
+            use sodium::{Cell, Listener, Stream};
+
+            pub fn chained(s: &Stream<i32>) -> Stream<i32> {
                 s.map(|a| *a + 1)
+                    .filter(|a| *a % 2 == 0)
+                    .filter_map(|a| Some(*a * 3))
             }
-        "#;
-        let fixed = r#"
-            pub fn f(s: sodium::Stream<i32>) -> sodium::Stream<i32> {
-                s.map(|a: &_| *a + 1)
+
+            pub fn with_cells(s: &Stream<i32>, c: &Cell<i32>) -> Stream<i32> {
+                s.snapshot(c, |a, b| *a + *b)
+            }
+
+            pub fn lifted(a: &Cell<i32>, b: &Cell<i32>) -> Cell<i32> {
+                a.lift2(b, |x, y| *x + *y)
+            }
+
+            pub fn listened(s: &Stream<i32>) -> Listener {
+                s.listen(|a| println!("{}", *a + 1))
             }
         "#;
 
-        let Some((broken_ok, stderr)) = compile(&dir, "broken", broken, true) else {
+        let Some((ok, stderr)) = compile(&dir, "downstream", source, true) else {
             eprintln!("skipping: could not locate the sodium rlib next to the test binary");
             return;
         };
         assert!(
-            !broken_ok,
-            "expected `s.map(|a| *a + 1)` to be rejected, but it compiled"
-        );
-        assert!(
-            stderr.contains("E0282"),
-            "expected error[E0282] (type annotations needed), got:\n{stderr}"
-        );
-
-        let (fixed_ok, stderr) =
-            compile(&dir, "fixed", fixed, true).expect("rustc ran once already");
-        assert!(
-            fixed_ok,
-            "expected `s.map(|a: &_| *a + 1)` to compile, got:\n{stderr}"
+            ok,
+            "the public API should accept bare closures from a downstream crate, got:\n{stderr}"
         );
     }
 
-    /// The same closure is accepted or rejected purely on the basis of which
-    /// trait the method is bounded on: `Cell::listen` (`IsLambda1`) rejects it,
-    /// `Cell::listen_weak` (`FnMut`) accepts it.
-    #[test]
-    fn islambda_rejects_what_fnmut_accepts() {
-        let dir = scratch("cell-listen");
-
-        let via_islambda = r#"
-            pub fn f(c: sodium::Cell<i32>) -> sodium::Listener {
-                c.listen(|a| println!("{}", *a + 1))
-            }
-        "#;
-        let via_fnmut = r#"
-            pub fn f(c: sodium::Cell<i32>) -> sodium::Listener {
-                c.listen_weak(|a| println!("{}", *a + 1))
-            }
-        "#;
-
-        let Some((islambda_ok, stderr)) = compile(&dir, "islambda", via_islambda, true) else {
-            eprintln!("skipping: could not locate the sodium rlib next to the test binary");
-            return;
-        };
-        assert!(
-            !islambda_ok,
-            "expected `Cell::listen` (IsLambda1 bound) to reject an unannotated closure"
-        );
-        assert!(
-            stderr.contains("E0282"),
-            "expected error[E0282], got:\n{stderr}"
-        );
-
-        let (fnmut_ok, stderr) =
-            compile(&dir, "fnmut", via_fnmut, true).expect("rustc ran once already");
-        assert!(
-            fnmut_ok,
-            "expected `Cell::listen_weak` (FnMut bound) to accept the very same closure, got:\n{stderr}"
-        );
-    }
-
-    /// Reduce the problem away from Sodium entirely.
+    /// Why the bounds are shaped the way they are.
     ///
     /// This snippet has no dependency on this crate. It declares a two-line
-    /// trait with the same shape as `IsLambda1` and a single blanket impl, and
-    /// reproduces E0282 exactly. Crucially, the element type is *concretely
-    /// known* from `Self` (as it is for `Stream<A>::map`), so the ambiguity is
-    /// not about `A` being open -- it is about the closure's own signature not
-    /// being deducible through a non-`Fn` trait bound.
+    /// trait with the same shape as the old `IsLambda1` and a single blanket
+    /// impl, and reproduces the E0282 that used to hit every call site. The
+    /// element type is *concretely known* from `Self` (as it is for
+    /// `Stream<A>::map`), so the failure was never about `A` being open -- it
+    /// was about the closure's own signature not being deducible through a
+    /// non-`Fn` trait bound.
     #[test]
-    fn minimal_reduction_without_sodium() {
+    fn the_old_islambda_shape_still_defeats_inference() {
         let dir = scratch("reduction");
 
         let source = r#"
@@ -414,9 +469,9 @@ mod compile_fail {
             pub struct Stream<A>(A);
 
             impl<A> Stream<A> {
-                // Same shape as sodium's `Stream::map`.
+                // The shape sodium's `Stream::map` used to have.
                 pub fn map_via_trait<B, F: IsLambda1<A, B>>(&self, _f: F) {}
-                // Same behaviour, bounded directly on `FnMut`.
+                // The shape it has now.
                 pub fn map_via_fnmut<B, F: FnMut(&A) -> B>(&self, _f: F) {}
             }
 
@@ -434,7 +489,7 @@ mod compile_fail {
             return;
         };
 
-        assert!(!ok, "expected the reduction to fail to compile");
+        assert!(!ok, "expected the old shape to fail to compile");
         assert!(
             stderr.contains("E0282"),
             "expected error[E0282] from the reduction, got:\n{stderr}"
@@ -445,18 +500,13 @@ mod compile_fail {
             stderr.contains("aborting due to 1 previous error"),
             "expected only the trait-bounded call to fail, got:\n{stderr}"
         );
-        assert!(
-            stderr.contains("map_via_trait") || stderr.contains("*a + 1"),
-            "expected the failure to be at the trait-bounded call, got:\n{stderr}"
-        );
     }
 
-    /// The two candidate impls (`Lambda<FN>` and the blanket `FN`) are *not*
-    /// the cause. This reduction has a single impl and still fails, which rules
-    /// out overlap/ambiguity between the two `IsLambda1` impls as the
-    /// explanation.
+    /// Rules out the other plausible explanation. The old `IsLambda1` had two
+    /// impls (`Lambda<FN>` and a blanket `FN`), so overlap between them is a
+    /// natural suspect. It was not the cause: a single impl fails identically.
     #[test]
-    fn a_single_impl_does_not_fix_it() {
+    fn a_single_impl_would_not_have_fixed_it() {
         let dir = scratch("single-impl");
 
         let source = r#"
@@ -486,14 +536,14 @@ mod compile_fail {
         );
     }
 
-    /// Adding `FnMut(&A) -> B` alongside the `IsLambda1` bound *does* restore
-    /// inference -- which confirms the diagnosis, but is not a free fix: it
-    /// would also reject the `Lambda` wrapper produced by `lambda1`, since
-    /// `Lambda<FN>` is a plain struct and does not implement `FnMut` on stable.
+    /// Why the API was split in two rather than given a second bound.
     ///
-    /// Both halves are asserted here so the trade-off is recorded, not guessed.
+    /// Adding `+ FnMut(&A) -> B` alongside `IsLambda1` restores inference, so
+    /// it looks like a one-line fix. It is not: the same bound rejects the
+    /// `Lambda` wrapper, which was the only thing `IsLambda1` was there to
+    /// accept. Both halves are asserted here so the trade-off stays recorded.
     #[test]
-    fn adding_an_fn_bound_fixes_inference_but_excludes_lambda() {
+    fn why_not_just_add_an_fn_bound() {
         let dir = scratch("fn-bound");
 
         let preamble = r#"
@@ -529,7 +579,8 @@ mod compile_fail {
             }}"
         );
 
-        // Half two: but the `Lambda` wrapper no longer type-checks.
+        // Half two: but the `Lambda` wrapper no longer type-checks, so the
+        // deps-carrying call sites would all break anyway.
         let lambda_rejected = format!(
             "{preamble}
             pub fn f(s: &Stream<i32>) {{
@@ -551,7 +602,7 @@ mod compile_fail {
         assert!(
             !ok && stderr.contains("E0277"),
             "expected the `Lambda` wrapper to be rejected by the added `FnMut` bound \
-             (this is the cost of the fix), got success={ok}:\n{stderr}"
+             (this is why the API was split instead), got success={ok}:\n{stderr}"
         );
     }
 }
@@ -561,108 +612,77 @@ mod compile_fail {
 // THEORY
 // ======
 //
-// The cause is not `Stream`, not `Cell`, and not the element type being
-// under-determined. It is that every combinator is bounded on `IsLambda1` (or
-// `IsLambda2`, ...) rather than on `FnMut`, and rustc's closure-signature
-// inference does not look through a user-defined trait.
+// Recorded because the fix is a bound change whose motivation is invisible from
+// the diff, and because the reduction tests above are only meaningful next to
+// the explanation.
 //
-// How rustc types a closure argument
-// ----------------------------------
+// The problem
+// -----------
+// Every combinator used to be bounded on `IsLambda1`..`IsLambda6` rather than on
+// `FnMut`, and rustc's closure-signature inference does not look through a
+// user-defined trait.
+//
 // When rustc sees `s.map(|a| *a + 1)` it must assign a type to `a` *before* it
-// type-checks the closure body. It tries to obtain an "expected signature" for
-// the closure from the obligations in scope on the closure's type variable. That
-// deduction (`deduce_closure_signature`) only fires for a fixed set of sources:
-// the `Fn`/`FnMut`/`FnOnce` traits, `AsyncFn*`, and the associated-type
-// projections that go with them. An obligation of the form
-// `?F: IsLambda1<i32, ?B>` is not one of them, so no expected signature is
-// produced.
+// type-checks the closure body. It tries to obtain an "expected signature" from
+// the obligations in scope on the closure's type variable. That deduction
+// (`deduce_closure_signature`) only fires for a fixed set of sources: the
+// `Fn`/`FnMut`/`FnOnce` traits, `AsyncFn*`, and the associated-type projections
+// that go with them. An obligation of the form `?F: IsLambda1<i32, ?B>` is not
+// one of them, so no expected signature was produced.
 //
-// With no expected signature, `a` becomes a bare inference variable `?T` and the
-// body is checked immediately. `*a` then requires knowing that `?T` is something
-// dereferenceable, and nothing has said so yet -- hence
-// `error[E0282]: type annotations needed ... type must be known at this point`,
-// pointing at the closure parameter.
+// With no expected signature, `a` became a bare inference variable `?T` and the
+// body was checked immediately. `*a` then required knowing that `?T` was
+// dereferenceable, and nothing had said so yet -- hence
+// `error[E0282]: type annotations needed`, pointing at the closure parameter.
 //
-// The information that would resolve it does exist: selecting the blanket impl
-// `impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN` against
+// The information that would have resolved it did exist: selecting the blanket
+// impl `impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN` against
 // `?F: IsLambda1<i32, ?B>` yields `?F: FnMut(&i32) -> ?B`. But that selection
-// happens after the closure body has already been checked, so it arrives too
+// happens after the closure body has already been checked, so it arrived too
 // late to inform `a`. Closure signature inference is a pre-pass, not a fixpoint.
 //
-// Why `|a: &_|` is enough
-// -----------------------
-// Writing `&_` supplies the one thing the pre-pass could not: the *shape* of the
-// parameter. `a: &'?r ?U` is now known to be a reference, so `*a + 1` type-checks
-// as `?U: Add<i32>` without needing `?U` resolved yet. `?U` is then filled in
-// later, from the trait obligation, once the impl is selected. The annotation is
-// not carrying the type -- it is carrying the indirection, so that the deferred
-// trait selection has something to unify against.
+// Why `|a: &_|` used to be enough, and why it sometimes wasn't
+// ------------------------------------------------------------
+// Writing `&_` supplied the one thing the pre-pass could not: the *shape* of the
+// parameter. `a: &'?r ?U` was known to be a reference, so `*a + 1` type-checked
+// as `?U: Add<i32>` without `?U` resolved, and `?U` was filled in later from the
+// trait obligation. The annotation was not carrying the type -- it was carrying
+// the indirection, so that deferred trait selection had something to unify
+// against.
 //
-// It follows that `&_` is a floor, not a guarantee. It works whenever the body
-// constrains the referent directly. When the body only constrains an associated
-// type of the referent -- `<?U as Neg>::Output == i32` says nothing about `?U`,
-// since `Neg::Output` is not injective -- the referent is still open and the
-// full `&i32` is needed. `ref_underscore_is_not_always_enough` above is exactly
-// that case: adding a unary minus to an otherwise identical closure pushes the
-// required annotation from `&_` to `&i32`.
+// That made `&_` a floor, not a guarantee. It worked whenever the body
+// constrained the referent directly. When the body only constrained an
+// associated type of the referent -- `<?U as Neg>::Output == i32` says nothing
+// about `?U`, since `Neg::Output` is not injective -- the referent stayed open
+// and the full `&i32` was needed.
+// `infers_even_when_body_only_constrains_an_associated_type` is that case.
 //
-// This also explains the higher-ranked flavour of the problem. `FnMut(&A) -> B`
-// desugars to `for<'a> FnMut(&'a A) -> B`. A closure only gets a late-bound
-// lifetime in its signature if rustc knew to give it one, which again requires
-// the expected signature. Inferred from the body alone, the closure ends up with
-// an early-bound region and can then fail to satisfy the `for<'a>` bound even
-// when the types line up.
+// The same reasoning explains the higher-ranked flavour: `FnMut(&A) -> B`
+// desugars to `for<'a> FnMut(&'a A) -> B`, and a closure only gets a late-bound
+// lifetime if rustc knew to give it one -- which again required the expected
+// signature.
 //
-// What the tests above pin down
-// -----------------------------
-// * `minimal_reduction_without_sodium` reproduces E0282 with a two-line trait
-//   and no Sodium at all, with `A` concretely known from `Self` -- so neither
-//   this crate's complexity nor an open element type is required.
-// * `a_single_impl_does_not_fix_it` removes the `Lambda<FN>` impl, leaving one
-//   candidate. It still fails, so impl ambiguity is not the cause either.
-// * `ref_underscore_is_not_always_enough` shows the annotation burden is not
-//   even a fixed `&_` tax; it varies with the closure body.
-// * `islambda_rejects_what_fnmut_accepts` runs the identical closure through
-//   `Cell::listen` and `Cell::listen_weak`, whose only difference is
-//   `IsLambda1<A, ()>` versus `FnMut(&A)`. That is the whole variable.
+// The fix
+// -------
+// Bound the combinators on `FnMut`/`Fn` directly, and move the
+// dependency-carrying form to a `*_with_deps` sibling that takes `Vec<Dep>` as
+// an explicit argument:
 //
-// Why the API is shaped this way
-// ------------------------------
-// `IsLambda1` is not gratuitous. It exists so a closure can optionally carry a
-// `Vec<Dep>` of extra FRP dependencies: `deps_op()` returns `None` for a plain
-// closure and `Some(deps)` for a `Lambda` built by `lambda1(f, deps)`. Sodium
-// needs those deps to build its dependency graph correctly when a closure
-// captures a `Cell` and calls `sample()` on it. The trait is the mechanism that
-// lets one parameter accept both forms.
+//     stream.map(|a| *a + 1)
+//     stream.map_with_deps(move |_| cell.sample(), vec![cell.to_dep()])
 //
-// Possible remedies, and their costs
-// ----------------------------------
-// 1. Add `+ FnMut(&A) -> B` to the existing bounds. Inference is restored --
-//    `adding_an_fn_bound_fixes_inference_but_excludes_lambda` shows the bare
-//    closure compiling. But the same test shows the cost: `Lambda<FN>` is a
-//    struct and does not implement `FnMut` on stable Rust, so `lambda1` call
-//    sites stop compiling. Not viable on its own.
+// `IsLambda1`..`IsLambda6`, `Lambda` and `lambda1`..`lambda6` are still the
+// mechanism underneath -- `*_with_deps` builds the `Lambda` for you -- but they
+// no longer appear in any public signature and are `#[doc(hidden)]`.
 //
-// 2. Split the API by shape. Bound the common methods on `FnMut(&A) -> B`
-//    directly, and offer the dependency-carrying form as a separate method
-//    (`map_with_deps(f, deps)`, or a `map_lambda`). The overwhelmingly common
-//    call site -- a plain closure -- then infers, and the rare one stays
-//    explicit. This is a breaking change to the `lambda1` call sites but not to
-//    ordinary closure call sites, and it needs no new trait machinery. This
-//    seems like the best trade.
+// Why not just add `+ FnMut(&A) -> B` to the old bounds? Because the extra
+// bound also rejects `Lambda<FN>`, which is a plain struct and cannot implement
+// `FnMut` on stable Rust. That would have broken every deps-carrying call site
+// -- the one thing `IsLambda1` existed to support.
+// `why_not_just_add_an_fn_bound` asserts both halves of that.
 //
-// 3. Keep `IsLambda1` but make `Lambda<FN>` implement `FnMut`. This would make
-//    option 1 work unconditionally, but `impl FnMut` for a user type requires
-//    the unstable `unboxed_closures` + `fn_traits` features, so it is not
-//    available on stable.
-//
-// 4. Leave the bounds alone and reduce the annotation burden with a macro or
-//    with helper constructors that pin the argument type. This does not fix the
-//    inference; it only hides it, and it does not help with method chains.
-//
-// Worth noting that this crate is already inconsistent about it: `Cell::listen`
-// takes `IsLambda1<A, ()>` while `Cell::listen_weak` right beside it takes
-// `FnMut(&A)`, and `split_enum2`/`split_enum3` take `Fn(&A) -> _`. Those methods
-// have never supported deps, and they are the ones that infer cleanly.
+// Making `Lambda<FN>` implement `FnMut` would make the single-bound approach
+// work, and is the cleaner end state, but it needs the unstable
+// `unboxed_closures` and `fn_traits` features.
 //
 // ---------------------------------------------------------------------------

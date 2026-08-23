@@ -2,7 +2,6 @@ use crate::cell::Cell;
 use crate::impl_::dep::Dep;
 use crate::impl_::enum_::{Enum2, Enum3};
 use crate::impl_::lambda::{lambda1, lambda2};
-use crate::impl_::lambda::{IsLambda1, IsLambda2, IsLambda3, IsLambda4, IsLambda5, IsLambda6};
 use crate::impl_::stream::Stream as StreamImpl;
 use crate::listener::Listener;
 use crate::sodium_ctx::SodiumCtx;
@@ -61,7 +60,7 @@ impl<A: Clone + Send + 'static> Stream<Option<A>> {
     /// values, removing the `Option` wrapper and discarding empty
     /// values.
     pub fn filter_option(&self) -> Stream<A> {
-        self.filter_map(|a: &Option<A>| a.clone())
+        self.filter_map(|a| a.clone())
     }
 
     pub fn split_opt(&self) -> (Stream<A>, Stream<()>) {
@@ -115,8 +114,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         }
     }
 
-    #[doc(hidden)]
-    // use as dependency to lambda1, lambda2, etc.
+    /// Return a handle to this node for use as an explicit FRP
+    /// dependency of a `*_with_deps` combinator.
     pub fn to_dep(&self) -> Dep {
         self.impl_.to_dep()
     }
@@ -134,14 +133,32 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn snapshot<
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: IsLambda2<A, B, C> + Send + Sync + 'static,
+        FN: FnMut(&A, &B) -> C + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         f: FN,
     ) -> Stream<C> {
+        self.snapshot_with_deps(cb, f, Vec::new())
+    }
+
+    /// A variant of [`snapshot`][Stream::snapshot] that declares extra
+    /// FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn snapshot_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        FN: FnMut(&A, &B) -> C + Send + Sync + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Stream<C> {
         Stream {
-            impl_: self.impl_.snapshot(&cb.impl_, f),
+            impl_: self.impl_.snapshot(&cb.impl_, lambda2(f, deps)),
         }
     }
 
@@ -149,7 +166,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// cell's value at the time of the event firing, ignoring the
     /// stream's value.
     pub fn snapshot1<B: Send + Clone + 'static>(&self, cb: &Cell<B>) -> Stream<B> {
-        self.snapshot(cb, |_a: &A, b: &B| b.clone())
+        self.snapshot(cb, |_a, b| b.clone())
     }
 
     /// A variant of [`snapshot`][Stream::snapshot] that captures the
@@ -158,24 +175,36 @@ impl<A: Clone + Send + 'static> Stream<A> {
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
-        FN: IsLambda3<A, B, C, D> + Send + Sync + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + Sync + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        f: FN,
+    ) -> Stream<D> {
+        self.snapshot3_with_deps(cb, cc, f, Vec::new())
+    }
+
+    /// A variant of [`snapshot3`][Stream::snapshot3] that declares extra
+    /// FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn snapshot3_with_deps<
+        B: Send + Clone + 'static,
+        C: Send + Clone + 'static,
+        D: Send + Clone + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
         mut f: FN,
+        mut deps: Vec<Dep>,
     ) -> Stream<D> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
         let cc = cc.clone();
         deps.push(cc.to_dep());
-        self.snapshot(
-            cb,
-            lambda2(move |a: &A, b: &B| f.call(a, b, &cc.sample()), deps),
-        )
+        self.snapshot_with_deps(cb, move |a, b| f(a, b, &cc.sample()), deps)
     }
 
     /// A variant of [`snapshot`][Stream::snapshot] that captures the
@@ -185,30 +214,41 @@ impl<A: Clone + Send + 'static> Stream<A> {
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
-        FN: IsLambda4<A, B, C, D, E> + Send + Sync + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + Sync + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        f: FN,
+    ) -> Stream<E> {
+        self.snapshot4_with_deps(cb, cc, cd, f, Vec::new())
+    }
+
+    /// A variant of [`snapshot4`][Stream::snapshot4] that declares extra
+    /// FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn snapshot4_with_deps<
+        B: Send + Clone + 'static,
+        C: Send + Clone + 'static,
+        D: Send + Clone + 'static,
+        E: Send + Clone + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
         cd: &Cell<D>,
         mut f: FN,
+        mut deps: Vec<Dep>,
     ) -> Stream<E> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
         let cc = cc.clone();
         let cd = cd.clone();
         deps.push(cc.to_dep());
         deps.push(cd.to_dep());
-        self.snapshot(
-            cb,
-            lambda2(
-                move |a: &A, b: &B| f.call(a, b, &cc.sample(), &cd.sample()),
-                deps,
-            ),
-        )
+        self.snapshot_with_deps(cb, move |a, b| f(a, b, &cc.sample(), &cd.sample()), deps)
     }
 
     /// A variant of [`snapshot`][Stream::snapshot] that captures the
@@ -219,7 +259,31 @@ impl<A: Clone + Send + 'static> Stream<A> {
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
-        FN: IsLambda5<A, B, C, D, E, F> + Send + Sync + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + Sync + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        ce: &Cell<E>,
+        f: FN,
+    ) -> Stream<F> {
+        self.snapshot5_with_deps(cb, cc, cd, ce, f, Vec::new())
+    }
+
+    /// A variant of [`snapshot5`][Stream::snapshot5] that declares extra
+    /// FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snapshot5_with_deps<
+        B: Send + Clone + 'static,
+        C: Send + Clone + 'static,
+        D: Send + Clone + 'static,
+        E: Send + Clone + 'static,
+        F: Send + Clone + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -227,24 +291,18 @@ impl<A: Clone + Send + 'static> Stream<A> {
         cd: &Cell<D>,
         ce: &Cell<E>,
         mut f: FN,
+        mut deps: Vec<Dep>,
     ) -> Stream<F> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
         let cc = cc.clone();
         let cd = cd.clone();
         let ce = ce.clone();
         deps.push(cc.to_dep());
         deps.push(cd.to_dep());
         deps.push(ce.to_dep());
-        self.snapshot(
+        self.snapshot_with_deps(
             cb,
-            lambda2(
-                move |a: &A, b: &B| f.call(a, b, &cc.sample(), &cd.sample(), &ce.sample()),
-                deps,
-            ),
+            move |a, b| f(a, b, &cc.sample(), &cd.sample(), &ce.sample()),
+            deps,
         )
     }
 
@@ -257,7 +315,33 @@ impl<A: Clone + Send + 'static> Stream<A> {
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
         G: Send + Clone + 'static,
-        FN: IsLambda6<A, B, C, D, E, F, G> + Send + Sync + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + Sync + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        ce: &Cell<E>,
+        cf: &Cell<F>,
+        f: FN,
+    ) -> Stream<G> {
+        self.snapshot6_with_deps(cb, cc, cd, ce, cf, f, Vec::new())
+    }
+
+    /// A variant of [`snapshot6`][Stream::snapshot6] that declares extra
+    /// FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn snapshot6_with_deps<
+        B: Send + Clone + 'static,
+        C: Send + Clone + 'static,
+        D: Send + Clone + 'static,
+        E: Send + Clone + 'static,
+        F: Send + Clone + 'static,
+        G: Send + Clone + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + Sync + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -266,12 +350,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         ce: &Cell<E>,
         cf: &Cell<F>,
         mut f: FN,
+        mut deps: Vec<Dep>,
     ) -> Stream<G> {
-        let mut deps = if let Some(deps2) = f.deps_op() {
-            deps2.clone()
-        } else {
-            Vec::new()
-        };
         let cc = cc.clone();
         let cd = cd.clone();
         let ce = ce.clone();
@@ -280,14 +360,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
         deps.push(cd.to_dep());
         deps.push(ce.to_dep());
         deps.push(cf.to_dep());
-        self.snapshot(
+        self.snapshot_with_deps(
             cb,
-            lambda2(
-                move |a: &A, b: &B| {
-                    f.call(a, b, &cc.sample(), &cd.sample(), &ce.sample(), &cf.sample())
-                },
-                deps,
-            ),
+            move |a, b| f(a, b, &cc.sample(), &cd.sample(), &ce.sample(), &cf.sample()),
+            deps,
         )
     }
 
@@ -298,27 +374,58 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// [`Cell::sample`], in which case it's equivalent to
     /// [`snapshot`][Stream::snapshot]ing the cell. In addition, the
     /// function must be referentially transparent.
-    pub fn map<B: Send + Clone + 'static, FN: IsLambda1<A, B> + Send + Sync + 'static>(
+    pub fn map<B: Send + Clone + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
         &self,
         f: FN,
     ) -> Stream<B> {
+        self.map_with_deps(f, Vec::new())
+    }
+
+    /// A variant of [`map`][Stream::map] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// Sodium builds its dependency graph from the shape of the FRP
+    /// network, which it cannot see inside a closure. If `f` captures a
+    /// [`Cell`] and calls [`sample`][Cell::sample] on it, that cell is a
+    /// real dependency of the resulting stream, and passing it here via
+    /// [`Cell::to_dep`] is what keeps the graph correct.
+    ///
+    /// This is a low-level escape hatch. Prefer expressing the
+    /// dependency in the network itself, with
+    /// [`snapshot`][Stream::snapshot] and friends, which do this
+    /// bookkeeping for you.
+    pub fn map_with_deps<B: Send + Clone + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+        &self,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Stream<B> {
         Stream {
-            impl_: self.impl_.map(f),
+            impl_: self.impl_.map(lambda1(f, deps)),
         }
     }
 
     /// Transform this `Stream`'s event values into the specified constant value.
     pub fn map_to<B: Send + Sync + Clone + 'static>(&self, b: B) -> Stream<B> {
-        self.map(move |_: &A| b.clone())
+        self.map(move |_| b.clone())
     }
 
     /// Return a `Stream` that only outputs events for which the predicate returns `true`.
-    pub fn filter<PRED: IsLambda1<A, bool> + Send + Sync + 'static>(
+    pub fn filter<PRED: FnMut(&A) -> bool + Send + Sync + 'static>(&self, pred: PRED) -> Stream<A> {
+        self.filter_with_deps(pred, Vec::new())
+    }
+
+    /// A variant of [`filter`][Stream::filter] that declares extra FRP
+    /// dependencies for the supplied predicate.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn filter_with_deps<PRED: FnMut(&A) -> bool + Send + Sync + 'static>(
         &self,
         pred: PRED,
+        deps: Vec<Dep>,
     ) -> Stream<A> {
         Stream {
-            impl_: self.impl_.filter(pred),
+            impl_: self.impl_.filter(lambda1(pred, deps)),
         }
     }
 
@@ -351,7 +458,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///     s
     ///         .stream()
     ///         .filter_map(|a: &&'static str| a.parse().ok())
-    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    ///         .listen(move |a| out.lock().unwrap().push(*a))
     /// };
     /// s.send("1");
     /// s.send("two");
@@ -368,7 +475,6 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// ```
     /// # use std::sync::{Arc, Mutex};
-    /// # use std::num::ParseIntError;
     /// # use sodium::SodiumCtx;
     /// #
     /// let mut sodium_ctx = SodiumCtx::new();
@@ -378,10 +484,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///     let out = out.clone();
     ///     s
     ///         .stream()
-    ///         .map(|a: &&'static str| a.parse())
-    ///         .filter(|a: &Result<i32, ParseIntError>| a.is_ok())
-    ///         .map(|a: &Result<i32, ParseIntError>| a.clone().unwrap())
-    ///         .listen(move |a: &i32| out.lock().unwrap().push(*a))
+    ///         .map(|a: &&'static str| a.parse::<i32>())
+    ///         .filter(|a| a.is_ok())
+    ///         .map(|a| a.clone().unwrap())
+    ///         .listen(move |a| out.lock().unwrap().push(*a))
     /// };
     /// s.send("1");
     /// s.send("two");
@@ -395,13 +501,29 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// ```
     pub fn filter_map<
         B: Send + Clone + 'static,
-        FN: IsLambda1<A, Option<B>> + Send + Sync + 'static,
+        FN: FnMut(&A) -> Option<B> + Send + Sync + 'static,
     >(
         &self,
         f: FN,
     ) -> Stream<B> {
+        self.filter_map_with_deps(f, Vec::new())
+    }
+
+    /// A variant of [`filter_map`][Stream::filter_map] that declares
+    /// extra FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn filter_map_with_deps<
+        B: Send + Clone + 'static,
+        FN: FnMut(&A) -> Option<B> + Send + Sync + 'static,
+    >(
+        &self,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Stream<B> {
         Stream {
-            impl_: self.impl_.filter_map(f),
+            impl_: self.impl_.filter_map(lambda1(f, deps)),
         }
     }
 
@@ -417,7 +539,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// of `merge` to make it clear that care should be taken because
     /// events can be dropped.
     pub fn or_else(&self, s2: &Stream<A>) -> Stream<A> {
-        self.merge(s2, |lhs: &A, _rhs: &A| lhs.clone())
+        self.merge(s2, |lhs, _rhs| lhs.clone())
     }
 
     /// Merge two streams of the same type into one, so that events on
@@ -430,13 +552,27 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// transaction. The event from `self` will appear at the left
     /// input of the combining function, and the event from `s2` will
     /// appear at the right.
-    pub fn merge<FN: IsLambda2<A, A, A> + Send + Sync + 'static>(
+    pub fn merge<FN: FnMut(&A, &A) -> A + Send + Sync + 'static>(
         &self,
         s2: &Stream<A>,
         f: FN,
     ) -> Stream<A> {
+        self.merge_with_deps(s2, f, Vec::new())
+    }
+
+    /// A variant of [`merge`][Stream::merge] that declares extra FRP
+    /// dependencies for the supplied combining function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn merge_with_deps<FN: FnMut(&A, &A) -> A + Send + Sync + 'static>(
+        &self,
+        s2: &Stream<A>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Stream<A> {
         Stream {
-            impl_: self.impl_.merge(&s2.impl_, f),
+            impl_: self.impl_.merge(&s2.impl_, lambda2(f, deps)),
         }
     }
 
@@ -461,7 +597,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn gate(&self, cpred: &Cell<bool>) -> Stream<A> {
         let cpred = cpred.clone();
         let cpred_dep = cpred.to_dep();
-        self.filter(lambda1(move |_: &A| cpred.sample(), vec![cpred_dep]))
+        self.filter_with_deps(move |_| cpred.sample(), vec![cpred_dep])
     }
 
     /// Return a stream that outputs only one value, which is the next
@@ -480,9 +616,23 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, (B, S)> + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
     {
-        self.collect_lazy(Lazy::new(move || init_state.clone()), f)
+        self.collect_with_deps(init_state, f, Vec::new())
+    }
+
+    /// A variant of [`collect`][Stream::collect] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn collect_with_deps<B, S, F>(&self, init_state: S, f: F, deps: Vec<Dep>) -> Stream<B>
+    where
+        B: Send + Clone + 'static,
+        S: Send + Clone + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+    {
+        self.collect_lazy_with_deps(Lazy::new(move || init_state.clone()), f, deps)
     }
 
     /// A variant of [`collect`][Stream::collect] that takes an
@@ -491,10 +641,29 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, (B, S)> + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+    {
+        self.collect_lazy_with_deps(init_state, f, Vec::new())
+    }
+
+    /// A variant of [`collect_lazy`][Stream::collect_lazy] that declares
+    /// extra FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn collect_lazy_with_deps<B, S, F>(
+        &self,
+        init_state: Lazy<S>,
+        f: F,
+        deps: Vec<Dep>,
+    ) -> Stream<B>
+    where
+        B: Send + Clone + 'static,
+        S: Send + Clone + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
     {
         Stream {
-            impl_: self.impl_.collect_lazy(init_state, f),
+            impl_: self.impl_.collect_lazy(init_state, lambda2(f, deps)),
         }
     }
 
@@ -509,9 +678,22 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum<S, F>(&self, init_state: S, f: F) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, S> + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
     {
-        self.accum_lazy(Lazy::new(move || init_state.clone()), f)
+        self.accum_with_deps(init_state, f, Vec::new())
+    }
+
+    /// A variant of [`accum`][Stream::accum] that declares extra FRP
+    /// dependencies for the supplied accumulating function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn accum_with_deps<S, F>(&self, init_state: S, f: F, deps: Vec<Dep>) -> Cell<S>
+    where
+        S: Send + Clone + 'static,
+        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+    {
+        self.accum_lazy_with_deps(Lazy::new(move || init_state.clone()), f, deps)
     }
 
     /// A variant of [`accum`][Stream::accum] that takes an initial
@@ -519,10 +701,23 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum_lazy<S, F>(&self, init_state: Lazy<S>, f: F) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, S> + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+    {
+        self.accum_lazy_with_deps(init_state, f, Vec::new())
+    }
+
+    /// A variant of [`accum_lazy`][Stream::accum_lazy] that declares
+    /// extra FRP dependencies for the supplied accumulating function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn accum_lazy_with_deps<S, F>(&self, init_state: Lazy<S>, f: F, deps: Vec<Dep>) -> Cell<S>
+    where
+        S: Send + Clone + 'static,
+        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
     {
         Cell {
-            impl_: self.impl_.accum_lazy(init_state, f),
+            impl_: self.impl_.accum_lazy(init_state, lambda2(f, deps)),
         }
     }
 
@@ -532,9 +727,22 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// With [`listen`][Stream::listen] the listener is only
     /// deregistered if [`Listener::unlisten`] is called explicitly.
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+        self.listen_weak_with_deps(k, Vec::new())
+    }
+
+    /// A variant of [`listen_weak`][Stream::listen_weak] that declares
+    /// extra FRP dependencies for the supplied handler.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+        &self,
+        k: K,
+        deps: Vec<Dep>,
+    ) -> Listener {
         Listener {
-            impl_: self.impl_.listen_weak(k),
+            impl_: self.impl_.listen_weak(lambda1(k, deps)),
         }
     }
 
@@ -550,9 +758,22 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// handler should not block. It also is not allowed to use
     /// [`CellSink::send`][crate::CellSink::send] or
     /// [`StreamSink::send`][crate::StreamSink::send] in the handler.
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+        self.listen_with_deps(k, Vec::new())
+    }
+
+    /// A variant of [`listen`][Stream::listen] that declares extra FRP
+    /// dependencies for the supplied handler.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn listen_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+        &self,
+        k: K,
+        deps: Vec<Dep>,
+    ) -> Listener {
         Listener {
-            impl_: self.impl_.listen(k),
+            impl_: self.impl_.listen(lambda1(k, deps)),
         }
     }
 }

@@ -17,7 +17,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** combinators that take a function are now bounded on `FnMut`/`Fn`
+  directly instead of on the `IsLambda1`..`IsLambda6` traits. Closure arguments
+  now infer, so call sites no longer need a type annotation on every closure
+  parameter (`stream.map(|a| *a + 1)` instead of `stream.map(|a: &_| *a + 1)`).
+
+  The previous bounds defeated rustc's closure signature deduction, which only
+  looks through the `Fn` family and not through user-defined traits, so a bare
+  closure failed with `error[E0282]: type annotations needed` even though the
+  element type was fully determined by the receiver.
+- **Breaking:** passing a `Lambda` built with `lambda1`..`lambda6` to a
+  combinator no longer compiles. Use the new `*_with_deps` variant instead:
+
+  ```rust
+  // before
+  stream.map(lambda1(move |a: &A| *a + c.sample(), vec![c.to_dep()]))
+  // after
+  stream.map_with_deps(move |a| *a + c.sample(), vec![c.to_dep()])
+  ```
+
+- `IsLambda1`..`IsLambda6`, `Lambda` and `lambda1`..`lambda6` remain exported but
+  are now `#[doc(hidden)]`; they are the mechanism behind `*_with_deps` rather
+  than part of the public surface.
+- `Dep`, `Cell::to_dep` and `Stream::to_dep` are no longer `#[doc(hidden)]`,
+  since they appear in the public `*_with_deps` signatures.
+- `Cell::listen_weak` now honours declared dependencies, matching
+  `Stream::listen_weak` and `Cell::listen`.
 - Various small performance improvements.
+
+### Added
+
+- `*_with_deps` variants of every function-taking combinator, for closures that
+  capture FRP nodes Sodium cannot otherwise see: `Stream::map_with_deps`,
+  `filter_with_deps`, `filter_map_with_deps`, `merge_with_deps`,
+  `snapshot_with_deps`, `snapshot3_with_deps`..`snapshot6_with_deps`,
+  `collect_with_deps`, `collect_lazy_with_deps`, `accum_with_deps`,
+  `accum_lazy_with_deps`, `listen_with_deps`, `listen_weak_with_deps`, and
+  `Cell::map_with_deps`, `lift2_with_deps`..`lift6_with_deps`,
+  `listen_with_deps`, `listen_weak_with_deps`.
 
 ## [2.1.2] - 2022-11-27
 

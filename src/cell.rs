@@ -1,10 +1,5 @@
 use crate::impl_::cell::Cell as CellImpl;
-use crate::impl_::lambda::IsLambda1;
-use crate::impl_::lambda::IsLambda2;
-use crate::impl_::lambda::IsLambda3;
-use crate::impl_::lambda::IsLambda4;
-use crate::impl_::lambda::IsLambda5;
-use crate::impl_::lambda::IsLambda6;
+use crate::impl_::lambda::{lambda1, lambda2, lambda3, lambda4, lambda5, lambda6};
 use crate::impl_::lazy::Lazy;
 use crate::listener::Listener;
 use crate::sodium_ctx::SodiumCtx;
@@ -63,8 +58,8 @@ impl<A: Clone + Send + 'static> Cell<A> {
         self.impl_.sample_lazy()
     }
 
-    // use as dependency to lambda1, lambda2, etc.
-    #[doc(hidden)]
+    /// Return a handle to this node for use as an explicit FRP
+    /// dependency of a `*_with_deps` combinator.
     pub fn to_dep(&self) -> Dep {
         self.impl_.to_dep()
     }
@@ -108,12 +103,32 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// The returned `Cell` always reflects the value produced by the
     /// function applied to the input `Cell`s value. The given
     /// function _must_ be referentially transparent.
-    pub fn map<B: Clone + Send + 'static, FN: IsLambda1<A, B> + Send + Sync + 'static>(
+    pub fn map<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
         &self,
         f: FN,
     ) -> Cell<B> {
+        self.map_with_deps(f, Vec::new())
+    }
+
+    /// A variant of [`map`][Cell::map] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// Sodium builds its dependency graph from the shape of the FRP
+    /// network, which it cannot see inside a closure. If `f` captures
+    /// another `Cell` and calls [`sample`][Cell::sample] on it, that cell
+    /// is a real dependency of the returned cell, and passing it here via
+    /// [`Cell::to_dep`] is what keeps the graph correct.
+    ///
+    /// This is a low-level escape hatch. Prefer expressing the
+    /// dependency in the network itself, with [`lift2`][Cell::lift2] and
+    /// friends, which do this bookkeeping for you.
+    pub fn map_with_deps<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+        &self,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<B> {
         Cell {
-            impl_: self.impl_.map(f),
+            impl_: self.impl_.map(lambda1(f, deps)),
         }
     }
 
@@ -123,14 +138,32 @@ impl<A: Clone + Send + 'static> Cell<A> {
     pub fn lift2<
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: IsLambda2<A, B, C> + Send + 'static,
+        FN: FnMut(&A, &B) -> C + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
         f: FN,
     ) -> Cell<C> {
+        self.lift2_with_deps(cb, f, Vec::new())
+    }
+
+    /// A variant of [`lift2`][Cell::lift2] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    pub fn lift2_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        FN: FnMut(&A, &B) -> C + Send + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<C> {
         Cell {
-            impl_: self.impl_.lift2(&cb.impl_, f),
+            impl_: self.impl_.lift2(&cb.impl_, lambda2(f, deps)),
         }
     }
 
@@ -141,15 +174,35 @@ impl<A: Clone + Send + 'static> Cell<A> {
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
-        FN: IsLambda3<A, B, C, D> + Send + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
         f: FN,
     ) -> Cell<D> {
+        self.lift3_with_deps(cb, cc, f, Vec::new())
+    }
+
+    /// A variant of [`lift3`][Cell::lift3] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    pub fn lift3_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<D> {
         Cell {
-            impl_: self.impl_.lift3(&cb.impl_, &cc.impl_, f),
+            impl_: self.impl_.lift3(&cb.impl_, &cc.impl_, lambda3(f, deps)),
         }
     }
 
@@ -161,7 +214,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
-        FN: IsLambda4<A, B, C, D, E> + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -169,8 +222,32 @@ impl<A: Clone + Send + 'static> Cell<A> {
         cd: &Cell<D>,
         f: FN,
     ) -> Cell<E> {
+        self.lift4_with_deps(cb, cc, cd, f, Vec::new())
+    }
+
+    /// A variant of [`lift4`][Cell::lift4] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    pub fn lift4_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        E: Clone + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<E> {
         Cell {
-            impl_: self.impl_.lift4(&cb.impl_, &cc.impl_, &cd.impl_, f),
+            impl_: self
+                .impl_
+                .lift4(&cb.impl_, &cc.impl_, &cd.impl_, lambda4(f, deps)),
         }
     }
 
@@ -183,7 +260,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
-        FN: IsLambda5<A, B, C, D, E, F> + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -192,10 +269,35 @@ impl<A: Clone + Send + 'static> Cell<A> {
         ce: &Cell<E>,
         f: FN,
     ) -> Cell<F> {
+        self.lift5_with_deps(cb, cc, cd, ce, f, Vec::new())
+    }
+
+    /// A variant of [`lift5`][Cell::lift5] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lift5_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        E: Clone + Send + 'static,
+        F: Clone + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        ce: &Cell<E>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<F> {
         Cell {
             impl_: self
                 .impl_
-                .lift5(&cb.impl_, &cc.impl_, &cd.impl_, &ce.impl_, f),
+                .lift5(&cb.impl_, &cc.impl_, &cd.impl_, &ce.impl_, lambda5(f, deps)),
         }
     }
 
@@ -209,7 +311,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
         G: Clone + Send + 'static,
-        FN: IsLambda6<A, B, C, D, E, F, G> + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -219,32 +321,77 @@ impl<A: Clone + Send + 'static> Cell<A> {
         cf: &Cell<F>,
         f: FN,
     ) -> Cell<G> {
+        self.lift6_with_deps(cb, cc, cd, ce, cf, f, Vec::new())
+    }
+
+    /// A variant of [`lift6`][Cell::lift6] that declares extra FRP
+    /// dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lift6_with_deps<
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        E: Clone + Send + 'static,
+        F: Clone + Send + 'static,
+        G: Clone + Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
+    >(
+        &self,
+        cb: &Cell<B>,
+        cc: &Cell<C>,
+        cd: &Cell<D>,
+        ce: &Cell<E>,
+        cf: &Cell<F>,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> Cell<G> {
         Cell {
-            impl_: self
-                .impl_
-                .lift6(&cb.impl_, &cc.impl_, &cd.impl_, &ce.impl_, &cf.impl_, f),
+            impl_: self.impl_.lift6(
+                &cb.impl_,
+                &cc.impl_,
+                &cd.impl_,
+                &ce.impl_,
+                &cf.impl_,
+                lambda6(f, deps),
+            ),
         }
     }
 
     /// Unwrap a [`Stream`] in a `Cell` to give a time-varying stream implementation.
     pub fn switch_s(csa: &Cell<Stream<A>>) -> Stream<A> {
         Stream {
-            impl_: CellImpl::switch_s(&csa.map(|sa: &Stream<A>| sa.impl_.clone()).impl_),
+            impl_: CellImpl::switch_s(&csa.map(|sa| sa.impl_.clone()).impl_),
         }
     }
 
     /// Unwrap a `Cell` in another `Cell` to give a time-varying cell implementation.
     pub fn switch_c(cca: &Cell<Cell<A>>) -> Cell<A> {
         Cell {
-            impl_: CellImpl::switch_c(&cca.map(|ca: &Cell<A>| ca.impl_.clone()).impl_),
+            impl_: CellImpl::switch_c(&cca.map(|ca| ca.impl_.clone()).impl_),
         }
     }
 
     /// A variant of [`listen`][Cell::listen] that will deregister the
     /// listener automatically if the listener is garbage-collected.
     pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+        self.listen_weak_with_deps(k, Vec::new())
+    }
+
+    /// A variant of [`listen_weak`][Cell::listen_weak] that declares
+    /// extra FRP dependencies for the supplied handler.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+        &self,
+        k: K,
+        deps: Vec<Dep>,
+    ) -> Listener {
         Listener {
-            impl_: self.impl_.listen_weak(k),
+            impl_: self.impl_.listen_weak(lambda1(k, deps)),
         }
     }
 
@@ -256,9 +403,22 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// This is an operational mechanism for interfacing between the
     /// world of I/O and FRP.
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+        self.listen_with_deps(k, Vec::new())
+    }
+
+    /// A variant of [`listen`][Cell::listen] that declares extra FRP
+    /// dependencies for the supplied handler.
+    ///
+    /// See [`map_with_deps`][Cell::map_with_deps] for when this is
+    /// needed.
+    pub fn listen_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+        &self,
+        k: K,
+        deps: Vec<Dep>,
+    ) -> Listener {
         Listener {
-            impl_: self.impl_.listen(k),
+            impl_: self.impl_.listen(lambda1(k, deps)),
         }
     }
 }

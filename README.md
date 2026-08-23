@@ -64,30 +64,34 @@ fn main() {
 
 ## Pitfalls
 
-### There is no global state
+### No Global State
 
 You create a `SodiumCtx` for your application and pass it around; every
 Sodium object is created from a context. There is no implicit ambient
 context to fall back on.
 
-### Sodium objects captured in a closure must be declared
+### Closures That Capture Sodium Objects
 
-When a closure captures a `Cell` or `Stream`, Sodium cannot see that
-dependency by itself. Wrap the closure with `lambda1` (or `lambda2`, ... up
-to `lambda6`) and list what it captured, exactly as the TypeScript version
-does:
+Sodium builds its dependency graph from the shape of the FRP network, and it
+cannot see inside a closure. If a closure captures a `Cell` or `Stream` and
+reaches it at call time -- by calling `sample()` on it, or by returning it --
+that node is a real dependency, and Sodium has to be told about it. Every
+combinator has a `*_with_deps` sibling for this:
 
 ```rust
-let deps = vec![ca.to_dep(), cb.to_dep()];
-let csw = csw_str.map(lambda1(
-    move |s: &&'static str| if *s == "ca" { ca.clone() } else { cb.clone() },
-    deps,
-));
+let bias = bias_cell.clone();
+let biased = stream.map_with_deps(
+    move |a| *a + bias.sample(),
+    vec![bias_cell.to_dep()],
+);
 ```
 
-Miss this and the graph will not know about the captured objects, which
-breaks update ordering and memory management. `src/tests.rs` has several
-worked examples.
+The `Dep`s must mirror what the closure actually captures. Declaring a node the
+closure does not hold a reference to corrupts the collector's bookkeeping.
+
+Prefer expressing the dependency in the network itself where you can --
+`snapshot`, `lift2` and friends do this bookkeeping for you -- and reach for
+`*_with_deps` only when the closure genuinely has to reach outside the graph.
 
 ## Repository layout
 
