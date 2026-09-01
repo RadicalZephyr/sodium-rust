@@ -528,7 +528,7 @@ impl<A: Send + 'static> Stream<A> {
                 NodeName::STREAM_LISTEN,
                 move || {
                     self_.with_data(|data: &mut StreamData<A>| {
-                        for firing in &data.firing_op {
+                        if let Some(firing) = &data.firing_op {
                             k.call(firing)
                         }
                     });

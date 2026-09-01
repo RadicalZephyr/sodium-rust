@@ -190,7 +190,7 @@ fn stream(c: &mut Criterion) {
             let mut values: Vec<u16> = Vec::new();
             let _listener = sink
                 .stream()
-                .filter(|v: &u16| *v % 3 == 0 && *v % 5 == 0)
+                .filter(|v: &u16| (*v).is_multiple_of(3) && (*v).is_multiple_of(5))
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
             for v in 0_u16..1000 {
@@ -207,7 +207,7 @@ fn stream(c: &mut Criterion) {
             let _listener = sink
                 .stream()
                 .map(|v: &u16| *v + 1)
-                .filter(|v: &u16| *v % 3 == 0 && *v % 5 == 0)
+                .filter(|v: &u16| (*v).is_multiple_of(3) && (*v).is_multiple_of(5))
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
             for v in 0_u16..1000 {
@@ -224,7 +224,7 @@ fn stream(c: &mut Criterion) {
             let _listener = sink
                 .stream()
                 .map(|v: &u16| *v + 1)
-                .filter(|v: &u16| *v % 3 == 0 && *v % 5 == 0)
+                .filter(|v: &u16| (*v).is_multiple_of(3) && (*v).is_multiple_of(5))
                 .map(|v: &u16| *v - 4)
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
@@ -242,9 +242,9 @@ fn stream(c: &mut Criterion) {
             let _listener = sink
                 .stream()
                 .map(|v: &u16| *v + 1)
-                .filter(|v: &u16| *v % 3 == 0)
+                .filter(|v: &u16| (*v).is_multiple_of(3))
                 .map(|v: &u16| *v - 4)
-                .filter(|v: &u16| *v % 5 == 0)
+                .filter(|v: &u16| (*v).is_multiple_of(5))
                 .listen(move |v: &u16| values.push(black_box(*v)));
 
             for v in 0_u16..1000 {

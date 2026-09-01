@@ -242,13 +242,11 @@ impl<A: Send + 'static> Cell<A> {
         })
     }
 
-    pub fn map<B: Send + 'static, FN: IsLambda1<A, B> + Send + Sync + 'static>(
-        &self,
-        f: FN,
-    ) -> Cell<B>
+    pub fn map<B, FN>(&self, f: FN) -> Cell<B>
     where
         A: Clone,
-        B: Clone,
+        B: Clone + Send + 'static,
+        FN: IsLambda1<A, B> + Send + Sync + 'static,
     {
         let self_ = self.clone();
         let f_deps = lambda1_deps(&f);
