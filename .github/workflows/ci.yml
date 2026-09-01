@@ -27,7 +27,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
-      - run: cargo test
+      - run: cargo test --workspace
 
   clippy:
     name: Clippy
@@ -37,7 +37,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: Rustfmt
@@ -47,4 +47,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt -- --check
+      - run: cargo fmt --all -- --check
