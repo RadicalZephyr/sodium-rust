@@ -1,3 +1,6 @@
+[workspace]
+members = ["coz-driver"]
+
 [package]
 name = "sodium"
 version = "0.1.3"

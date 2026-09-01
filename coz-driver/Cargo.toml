@@ -7,7 +7,4 @@ edition = "2021"
 
 [dependencies]
 coz = "0.1"
-sodium-rust = { path = "../" }
-
-[profile.release]
-debug = 1
+sodium = { path = ".." }
