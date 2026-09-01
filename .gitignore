@@ -2,3 +2,5 @@
 **/*.rs.bk
 Cargo.lock
 /.vscode
+# trybuild writes mismatched stderr here for review
+/wip

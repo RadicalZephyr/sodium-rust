@@ -1,0 +1,10 @@
+error[E0282]: type annotations needed
+  --> tests/ui/single_impl.rs:22:18
+   |
+22 |     apply(1i32, |a| *a + 1); // still rejected
+   |                  ^  -- type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+22 |     apply(1i32, |a: /* Type */| *a + 1); // still rejected
+   |                   ++++++++++++

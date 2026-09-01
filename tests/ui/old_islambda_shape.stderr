@@ -1,0 +1,10 @@
+error[E0282]: type annotations needed
+  --> tests/ui/old_islambda_shape.rs:38:22
+   |
+38 |     s.map_via_trait(|a| *a + 1); // rejected
+   |                      ^  -- type must be known at this point
+   |
+help: consider giving this closure parameter an explicit type
+   |
+38 |     s.map_via_trait(|a: /* Type */| *a + 1); // rejected
+   |                       ++++++++++++

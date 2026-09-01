@@ -12,9 +12,9 @@
 //! its parameter annotated -- at minimum `|a: &_|`, sometimes the full `|a: &i32|`
 //! -- because rustc's closure signature deduction does not look through a
 //! user-defined trait. See `THEORY` at the bottom of this file for the full
-//! diagnosis, which the `compile_fail` module below keeps honest.
+//! diagnosis.
 //!
-//! The tests are in three parts:
+//! The tests here are in two parts:
 //!
 //! * `infers_*` -- the API exercised with bare, unannotated closures. These are
 //!   the regression guard: if a combinator is ever moved back onto an
@@ -22,9 +22,11 @@
 //! * `with_deps_*` -- the `*_with_deps` siblings, which take an explicit
 //!   `Vec<Dep>` for the rare case where a closure captures FRP nodes that
 //!   Sodium cannot see.
-//! * `compile_fail` -- drives `rustc` over standalone snippets to verify the
-//!   inference claim, and reduces the *old* failure to a minimal local trait so
-//!   the reasoning behind the current design stays recorded.
+//!
+//! The compile-time half lives in `tests/ui.rs` and `tests/ui/`, run with
+//! `trybuild`: it checks the same inference guarantee from outside the crate,
+//! and reduces the *old* failure to a few lines of standalone Rust so the
+//! reasoning below stays checked rather than merely asserted.
 
 use sodium::{Cell, Dep, Listener, SodiumCtx, Stream};
 use std::sync::{Arc, Mutex};
@@ -325,295 +327,12 @@ fn with_deps_variants_infer_too() {
 }
 
 // ---------------------------------------------------------------------------
-// Part 3: verify the claim, and keep the reasoning on file.
-//
-// `cargo test` cannot contain code that fails to compile, so these tests drive
-// `rustc` over standalone snippets and assert on the outcome.
-// ---------------------------------------------------------------------------
-
-mod compile_fail {
-    use std::path::{Path, PathBuf};
-    use std::process::Command;
-
-    /// Locate the `sodium` rlib that this test binary was linked against, plus
-    /// the `deps` directory it lives in. Returns `None` if the layout is not
-    /// what we expect, in which case the calling test reports a skip rather
-    /// than a spurious failure.
-    fn sodium_rlib() -> Option<(PathBuf, PathBuf)> {
-        let exe = std::env::current_exe().ok()?;
-        let deps = exe.parent()?.to_path_buf();
-
-        let mut newest: Option<(std::time::SystemTime, PathBuf)> = None;
-        for entry in std::fs::read_dir(&deps).ok()? {
-            let path = entry.ok()?.path();
-            let name = path.file_name()?.to_str()?.to_owned();
-            if !name.starts_with("libsodium-") || !name.ends_with(".rlib") {
-                continue;
-            }
-            let mtime = path.metadata().ok()?.modified().ok()?;
-            let better = match &newest {
-                Some((best, _)) => mtime > *best,
-                None => true,
-            };
-            if better {
-                newest = Some((mtime, path));
-            }
-        }
-
-        newest.map(|(_, rlib)| (rlib, deps))
-    }
-
-    /// Compile `source` as a standalone crate and return rustc's stderr,
-    /// together with whether it succeeded. `link_sodium` controls whether the
-    /// snippet gets access to this crate.
-    fn compile(dir: &Path, name: &str, source: &str, link_sodium: bool) -> Option<(bool, String)> {
-        let src = dir.join(format!("{name}.rs"));
-        std::fs::write(&src, source).ok()?;
-
-        let mut cmd = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()));
-        cmd.arg("--edition=2021")
-            .arg("--crate-type=lib")
-            .arg("--emit=metadata")
-            .arg("-o")
-            .arg(dir.join(format!("{name}.meta")))
-            .arg(&src);
-
-        if link_sodium {
-            let (rlib, deps) = sodium_rlib()?;
-            cmd.arg("-L")
-                .arg(format!("dependency={}", deps.display()))
-                .arg("--extern")
-                .arg(format!("sodium={}", rlib.display()));
-        }
-
-        let out = cmd.output().ok()?;
-        Some((
-            out.status.success(),
-            String::from_utf8_lossy(&out.stderr).into_owned(),
-        ))
-    }
-
-    /// A scratch directory for the snippets. `CARGO_TARGET_TMPDIR` is Cargo's
-    /// per-integration-test scratch space, so this stays inside `target/` and
-    /// gets cleaned up by `cargo clean`.
-    fn scratch(name: &str) -> PathBuf {
-        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("inference-{name}"));
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    }
-
-    /// The headline guarantee, checked from outside the crate: a chain of bare
-    /// closures compiles.
-    ///
-    /// Part 1 covers this too, but only as this crate's own integration test.
-    /// Compiling a standalone crate against the built rlib checks it the way a
-    /// downstream user would hit it.
-    #[test]
-    fn downstream_crate_can_use_bare_closures() {
-        let dir = scratch("downstream");
-
-        let source = r#"
-            use sodium::{Cell, Listener, Stream};
-
-            pub fn chained(s: &Stream<i32>) -> Stream<i32> {
-                s.map(|a| *a + 1)
-                    .filter(|a| *a % 2 == 0)
-                    .filter_map(|a| Some(*a * 3))
-            }
-
-            pub fn with_cells(s: &Stream<i32>, c: &Cell<i32>) -> Stream<i32> {
-                s.snapshot(c, |a, b| *a + *b)
-            }
-
-            pub fn lifted(a: &Cell<i32>, b: &Cell<i32>) -> Cell<i32> {
-                a.lift2(b, |x, y| *x + *y)
-            }
-
-            pub fn listened(s: &Stream<i32>) -> Listener {
-                s.listen(|a| println!("{}", *a + 1))
-            }
-        "#;
-
-        let Some((ok, stderr)) = compile(&dir, "downstream", source, true) else {
-            eprintln!("skipping: could not locate the sodium rlib next to the test binary");
-            return;
-        };
-        assert!(
-            ok,
-            "the public API should accept bare closures from a downstream crate, got:\n{stderr}"
-        );
-    }
-
-    /// Why the bounds are shaped the way they are.
-    ///
-    /// This snippet has no dependency on this crate. It declares a two-line
-    /// trait with the same shape as the old `IsLambda1` and a single blanket
-    /// impl, and reproduces the E0282 that used to hit every call site. The
-    /// element type is *concretely known* from `Self` (as it is for
-    /// `Stream<A>::map`), so the failure was never about `A` being open -- it
-    /// was about the closure's own signature not being deducible through a
-    /// non-`Fn` trait bound.
-    #[test]
-    fn the_old_islambda_shape_still_defeats_inference() {
-        let dir = scratch("reduction");
-
-        let source = r#"
-            pub trait IsLambda1<A, B> {
-                fn call(&mut self, a: &A) -> B;
-            }
-
-            impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
-                fn call(&mut self, a: &A) -> B { self(a) }
-            }
-
-            pub struct Stream<A>(A);
-
-            impl<A> Stream<A> {
-                // The shape sodium's `Stream::map` used to have.
-                pub fn map_via_trait<B, F: IsLambda1<A, B>>(&self, _f: F) {}
-                // The shape it has now.
-                pub fn map_via_fnmut<B, F: FnMut(&A) -> B>(&self, _f: F) {}
-            }
-
-            pub fn control(s: &Stream<i32>) {
-                s.map_via_fnmut(|a| *a + 1);   // infers fine
-            }
-
-            pub fn broken(s: &Stream<i32>) {
-                s.map_via_trait(|a| *a + 1);   // rejected
-            }
-        "#;
-
-        let Some((ok, stderr)) = compile(&dir, "reduction", source, false) else {
-            eprintln!("skipping: could not run rustc");
-            return;
-        };
-
-        assert!(!ok, "expected the old shape to fail to compile");
-        assert!(
-            stderr.contains("E0282"),
-            "expected error[E0282] from the reduction, got:\n{stderr}"
-        );
-        // Exactly one error: the `FnMut`-bounded call inferred fine, only the
-        // trait-bounded one failed.
-        assert!(
-            stderr.contains("aborting due to 1 previous error"),
-            "expected only the trait-bounded call to fail, got:\n{stderr}"
-        );
-    }
-
-    /// Rules out the other plausible explanation. The old `IsLambda1` had two
-    /// impls (`Lambda<FN>` and a blanket `FN`), so overlap between them is a
-    /// natural suspect. It was not the cause: a single impl fails identically.
-    #[test]
-    fn a_single_impl_would_not_have_fixed_it() {
-        let dir = scratch("single-impl");
-
-        let source = r#"
-            pub trait IsLambda1<A, B> {
-                fn call(&mut self, a: &A) -> B;
-            }
-
-            // The only impl in scope. No `Lambda<FN>` to be ambiguous with.
-            impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
-                fn call(&mut self, a: &A) -> B { self(a) }
-            }
-
-            pub fn apply<A, B, F: IsLambda1<A, B>>(_a: A, _f: F) {}
-
-            pub fn broken() {
-                apply(1i32, |a| *a + 1);   // still rejected
-            }
-        "#;
-
-        let Some((ok, stderr)) = compile(&dir, "single", source, false) else {
-            eprintln!("skipping: could not run rustc");
-            return;
-        };
-        assert!(
-            !ok && stderr.contains("E0282"),
-            "expected E0282 even with a single impl, got success={ok}:\n{stderr}"
-        );
-    }
-
-    /// Why the API was split in two rather than given a second bound.
-    ///
-    /// Adding `+ FnMut(&A) -> B` alongside `IsLambda1` restores inference, so
-    /// it looks like a one-line fix. It is not: the same bound rejects the
-    /// `Lambda` wrapper, which was the only thing `IsLambda1` was there to
-    /// accept. Both halves are asserted here so the trade-off stays recorded.
-    #[test]
-    fn why_not_just_add_an_fn_bound() {
-        let dir = scratch("fn-bound");
-
-        let preamble = r#"
-            pub trait IsLambda1<A, B> {
-                fn call(&mut self, a: &A) -> B;
-                fn deps(&self) -> usize;
-            }
-
-            pub struct Lambda<FN> { pub f: FN, pub deps: usize }
-
-            impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for Lambda<FN> {
-                fn call(&mut self, a: &A) -> B { (self.f)(a) }
-                fn deps(&self) -> usize { self.deps }
-            }
-
-            impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
-                fn call(&mut self, a: &A) -> B { self(a) }
-                fn deps(&self) -> usize { 0 }
-            }
-
-            pub struct Stream<A>(pub A);
-
-            impl<A> Stream<A> {
-                pub fn map<B, F: IsLambda1<A, B> + FnMut(&A) -> B>(&self, _f: F) {}
-            }
-        "#;
-
-        // Half one: a bare closure now infers.
-        let closure_ok = format!(
-            "{preamble}
-            pub fn f(s: &Stream<i32>) {{
-                s.map(|a| *a + 1);
-            }}"
-        );
-
-        // Half two: but the `Lambda` wrapper no longer type-checks, so the
-        // deps-carrying call sites would all break anyway.
-        let lambda_rejected = format!(
-            "{preamble}
-            pub fn f(s: &Stream<i32>) {{
-                s.map(Lambda {{ f: |a: &i32| *a + 1, deps: 3 }});
-            }}"
-        );
-
-        let Some((ok, stderr)) = compile(&dir, "closure", &closure_ok, false) else {
-            eprintln!("skipping: could not run rustc");
-            return;
-        };
-        assert!(
-            ok,
-            "adding an `FnMut` bound should let a bare closure infer, got:\n{stderr}"
-        );
-
-        let (ok, stderr) =
-            compile(&dir, "lambda", &lambda_rejected, false).expect("rustc ran once already");
-        assert!(
-            !ok && stderr.contains("E0277"),
-            "expected the `Lambda` wrapper to be rejected by the added `FnMut` bound \
-             (this is why the API was split instead), got success={ok}:\n{stderr}"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 //
 // THEORY
 // ======
 //
 // Recorded because the fix is a bound change whose motivation is invisible from
-// the diff, and because the reduction tests above are only meaningful next to
+// the diff, and because the `tests/ui/` reductions are only meaningful next to
 // the explanation.
 //
 // The problem
@@ -655,7 +374,8 @@ mod compile_fail {
 // associated type of the referent -- `<?U as Neg>::Output == i32` says nothing
 // about `?U`, since `Neg::Output` is not injective -- the referent stayed open
 // and the full `&i32` was needed.
-// `infers_even_when_body_only_constrains_an_associated_type` is that case.
+// `infers_even_when_body_only_constrains_an_associated_type` is that case, and
+// `tests/ui/bare_closures.rs` pins it down from outside the crate.
 //
 // The same reasoning explains the higher-ranked flavour: `FnMut(&A) -> B`
 // desugars to `for<'a> FnMut(&'a A) -> B`, and a closure only gets a late-bound
@@ -679,7 +399,8 @@ mod compile_fail {
 // bound also rejects `Lambda<FN>`, which is a plain struct and cannot implement
 // `FnMut` on stable Rust. That would have broken every deps-carrying call site
 // -- the one thing `IsLambda1` existed to support.
-// `why_not_just_add_an_fn_bound` asserts both halves of that.
+// `tests/ui/fn_bound_rescues_closure.rs` and
+// `tests/ui/fn_bound_rejects_lambda.rs` assert both halves of that.
 //
 // Making `Lambda<FN>` implement `FnMut` would make the single-bound approach
 // work, and is the cleaner end state, but it needs the unstable
