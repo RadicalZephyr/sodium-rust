@@ -15,19 +15,34 @@ concurrency:
 jobs:
 
   test:
-    name: Tests
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.toolchain }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
+      # A failure is usually specific to one platform or toolchain; let the
+      # rest report instead of cancelling them.
+      fail-fast: false
       matrix:
+        # The toolchain matrix runs on Linux. macOS and Windows get stable
+        # only -- they are there to catch platform-specific breakage in the
+        # GC's hand-written Send/Sync impls, not to re-test rustc versions.
+        os:
+          - ubuntu-latest
         toolchain:
           - stable
           - beta
         experimental:
           - false
         include:
-          - toolchain: nightly
+          - os: ubuntu-latest
+            toolchain: nightly
             experimental: true
+          - os: macos-latest
+            toolchain: stable
+            experimental: false
+          - os: windows-latest
+            toolchain: stable
+            experimental: false
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
