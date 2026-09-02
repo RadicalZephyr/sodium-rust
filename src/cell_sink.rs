@@ -20,8 +20,14 @@ impl<A> Clone for CellSink<A> {
 }
 
 impl<A: Clone + Send + 'static> CellSink<A> {
+    /// Create a new `CellSink` in the [ambient
+    /// context][SodiumCtx::current].
+    pub fn new(a: A) -> CellSink<A> {
+        CellSink::new_in(&SodiumCtx::current(), a)
+    }
+
     /// Create a new `CellSink` in the given context.
-    pub fn new(sodium_ctx: &SodiumCtx, a: A) -> CellSink<A> {
+    pub fn new_in(sodium_ctx: &SodiumCtx, a: A) -> CellSink<A> {
         CellSink {
             impl_: CellSinkImpl::new(&sodium_ctx.impl_, a),
         }

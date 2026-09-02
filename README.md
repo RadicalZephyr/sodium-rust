@@ -30,13 +30,11 @@ sodium = "0.1"
 ## Example
 
 ```rust
-use sodium::SodiumCtx;
+use sodium::StreamSink;
 
 fn main() {
-    let ctx = SodiumCtx::new();
-
     // A StreamSink is how values from the outside world enter the graph.
-    let clicks = ctx.new_stream_sink();
+    let clicks: StreamSink<()> = StreamSink::new();
 
     // Streams are discrete events. Cells are values that persist over time.
     let count = clicks.stream().accum(0, |_click: &(), n: &i32| n + 1);
@@ -55,6 +53,51 @@ fn main() {
 `Cell::listen` fires immediately with the cell's current value, so this prints
 `clicked 0 times` before any event is sent, then once per `send`.
 
+## Contexts
+
+Every Sodium object belongs to a `SodiumCtx`, and the objects in one FRP
+graph must all come from the same one. You do not have to name it: each
+thread has an ambient context, created the first time something asks for
+it, and the constructors above use it. `sodium::transaction` and
+`sodium::post` run against the same ambient context.
+
+The context is ambient per thread rather than per process because a
+`SodiumCtx` holds its transaction depth in a single counter. Two threads
+running transactions on one context interleave their increments, a
+transaction gets closed by the wrong thread, and updates are dropped. One
+context per thread means threads never share transaction state by
+accident.
+
+When you do want an explicit context -- to run independent graphs in one
+thread, or to build one graph from several threads -- every constructor
+has an `*_in` sibling that takes one, and `SodiumCtx::enter` makes a
+context ambient for a scope:
+
+```rust
+use sodium::{SodiumCtx, StreamSink};
+
+let ctx = SodiumCtx::new();
+let sink: StreamSink<i32> = ctx.new_stream_sink();
+
+std::thread::scope(|scope| {
+    scope.spawn(|| {
+        let _guard = ctx.enter();
+        // Built in `ctx`, not in this thread's own ambient context, so it
+        // can be wired to `sink`'s graph.
+        let doubled = sink.stream().map(|a: &i32| a * 2);
+        let _keep = doubled.listen(|n: &i32| println!("{n}"));
+    });
+});
+```
+
+Entering a context decides where new objects are built; it does not make
+concurrent transactions on one context safe. Drive a given context from
+one thread at a time.
+
+Combining objects from two different contexts panics rather than
+silently building a broken graph, so a missing `enter` shows up as an
+error that names the mistake.
+
 ## Documentation
 
 - [API documentation on docs.rs](https://docs.rs/sodium).
@@ -63,12 +106,6 @@ fn main() {
 - `docs/internals/insights.md` covers implementation notes.
 
 ## Pitfalls
-
-### No Global State
-
-You create a `SodiumCtx` for your application and pass it around; every
-Sodium object is created from a context. There is no implicit ambient
-context to fall back on.
 
 ### Closures That Capture Sodium Objects
 

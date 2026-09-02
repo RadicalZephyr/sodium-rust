@@ -26,9 +26,21 @@ impl<A> Clone for Cell<A> {
 
 impl<A: Clone + Send + 'static> Cell<A> {
     /// Create a `Cell` with a constant value.
-    pub fn new(sodium_ctx: &SodiumCtx, value: A) -> Cell<A> {
+    pub fn new(value: A) -> Cell<A> {
+        Cell::new_in(&SodiumCtx::current(), value)
+    }
+
+    /// Create a `Cell` with a constant value in the given context.
+    pub fn new_in(sodium_ctx: &SodiumCtx, value: A) -> Cell<A> {
         Cell {
             impl_: CellImpl::new(&sodium_ctx.impl_, value),
+        }
+    }
+
+    /// The context this `Cell` belongs to.
+    pub fn sodium_ctx(&self) -> SodiumCtx {
+        SodiumCtx {
+            impl_: self.impl_.sodium_ctx(),
         }
     }
 

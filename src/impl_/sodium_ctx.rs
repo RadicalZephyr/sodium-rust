@@ -146,6 +146,11 @@ impl SodiumCtx {
         self.gc_ctx.clone()
     }
 
+    /// Are these two handles clones of the same underlying context?
+    pub fn ptr_eq(&self, other: &SodiumCtx) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
+    }
+
     pub fn null_node(&self) -> Node {
         Node::new(self, NodeName::NullNode, || {}, Vec::new())
     }

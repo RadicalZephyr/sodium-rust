@@ -1,6 +1,29 @@
 //! Sodium is a library for doing Functional Reactive Programming
 //! (FRP) in Rust.
+//!
+//! Every Sodium object belongs to a [`SodiumCtx`], and the objects in one
+//! FRP graph must all come from the same one. You do not have to name it:
+//! each thread has an ambient context, created on first use, and the
+//! constructors here use it.
+//!
+//! ```
+//! use sodium::{transaction, StreamSink};
+//!
+//! let clicks: StreamSink<()> = StreamSink::new();
+//! let count = clicks.stream().accum(0, |_click: &(), n: &i32| n + 1);
+//! let listener = count.listen(|n: &i32| println!("clicked {n} times"));
+//!
+//! transaction(|| clicks.send(()));
+//! listener.unlisten();
+//! ```
+//!
+//! For an explicit context -- independent graphs in one thread, or one
+//! graph built from several threads -- every constructor has an `*_in`
+//! sibling that takes one, and [`SodiumCtx::enter`] makes a context
+//! ambient for a scope. See [`SodiumCtx::current`] for the details, and
+//! why the default is per thread rather than per process.
 
+mod ambient;
 mod cell;
 mod cell_loop;
 mod cell_sink;
@@ -14,6 +37,9 @@ mod stream_loop;
 mod stream_sink;
 mod transaction;
 
+pub use self::ambient::post;
+pub use self::ambient::transaction;
+pub use self::ambient::CtxGuard;
 pub use self::cell::Cell;
 pub use self::cell_loop::CellLoop;
 pub use self::cell_sink::CellSink;

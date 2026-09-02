@@ -12,10 +12,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This CHANGELOG file.
 - Dependency on [parking-lot].
 - New `filter_map` combinator.
+- An ambient `SodiumCtx` per thread, so a context no longer has to be
+  threaded through an application by hand. `SodiumCtx::current` returns it,
+  creating it on first use; `SodiumCtx::enter` makes a given context ambient
+  for a scope, which is how one FRP graph is built from more than one thread.
+- Context-free constructors that use the ambient context: `Stream::new`,
+  `Cell::new`, `StreamSink::new`, `StreamSink::new_with_coalescer`,
+  `CellSink::new`, `StreamLoop::new`, `CellLoop::new` and `Transaction::new`,
+  plus the free functions `sodium::transaction` and `sodium::post`.
+- `Default` implementations for `Stream`, `StreamSink`, `StreamLoop`,
+  `CellLoop` and `Transaction`.
+- `SodiumCtx::ptr_eq`, for asking whether two handles are the same context.
 
 [parking-lot]: https://crates.io/crates/parking-lot
 
 ### Changed
+
+- **Breaking:** the constructors that take a `SodiumCtx` explicitly are now
+  named `*_in`: `Stream::new_in`, `Cell::new_in`, `StreamSink::new_in`,
+  `StreamSink::new_with_coalescer_in`, `CellSink::new_in`,
+  `StreamLoop::new_in`, `CellLoop::new_in`, `Transaction::new_in` and
+  `Router::new_in`. The plain names now use the ambient context. The
+  `SodiumCtx::new_*` factory methods are unchanged, so code that builds
+  everything through a context needs no edits.
+- **Breaking:** `Router::new` no longer takes a `SodiumCtx`. A `Router` is
+  created in its input stream's context, which the input stream already
+  names.
+- Combining Sodium objects from two different contexts now panics at the
+  point the two graphs are wired together. It previously built a graph whose
+  halves had separate transaction state and separate collectors, which
+  dropped events and fired them out of order, with no diagnostic.
 
 - **Breaking:** combinators that take a function are now bounded on `FnMut`/`Fn`
   directly instead of on the `IsLambda1`..`IsLambda6` traits. Closure arguments

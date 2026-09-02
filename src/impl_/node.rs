@@ -7,10 +7,31 @@ use std::sync::Arc;
 use std::sync::Weak;
 
 use crate::impl_::dep::Dep;
-use crate::impl_::gc_node::{GcNode, Tracer};
+use crate::impl_::gc_node::{GcCtx, GcNode, Tracer};
 use crate::impl_::sodium_ctx::SodiumCtx;
 
 use super::name::NodeName;
+
+/// Combining nodes from two different contexts cannot work: the two
+/// halves of the resulting graph have separate transaction state and
+/// separate collectors, so events are dropped and fire out of order.
+/// Nothing detected that before, so it failed silently.
+const MIXED_CTX: &str = "Sodium objects from two different SodiumCtx were combined. \
+     Every node in one FRP graph must come from the same context. \
+     This most often happens when a node is constructed on a second \
+     thread, which has its own ambient context.";
+
+/// Panic if two nodes about to be wired together belong to different
+/// contexts.
+pub(crate) fn assert_same_ctx(a: &SodiumCtx, b: &SodiumCtx) {
+    assert!(a.ptr_eq(b), "{}", MIXED_CTX);
+}
+
+/// [`assert_same_ctx`] for the collector side of a context, used where a
+/// node is referenced by [`Dep`] rather than by a graph edge.
+pub(crate) fn assert_ctx_of_gc_node(gc_ctx: &GcCtx, gc_node: &GcNode) {
+    assert!(gc_ctx.ptr_eq(gc_node.gc_ctx()), "{}", MIXED_CTX);
+}
 
 pub trait IsNode: Send + Sync {
     fn node(&self) -> &Node;
@@ -32,13 +53,20 @@ impl<T: IsNode> IsNodeExt for T {}
 
 pub trait IsNodeExt: IsNode {
     fn add_update_dependencies(&self, update_dependencies: Vec<Dep>) {
+        let gc_ctx = self.node().sodium_ctx.gc_ctx();
         let mut update_dependencies2 = self.data().update_dependencies.write();
         for dep in update_dependencies {
+            // A `Dep` names a node the update closure reaches at call time.
+            // It is not a graph edge, so it does not go through
+            // `add_dependency`, but it is still a node from some context,
+            // and it has to be a node from *this* one.
+            assert_ctx_of_gc_node(&gc_ctx, dep.gc_node());
             update_dependencies2.push(dep);
         }
     }
 
     fn add_dependency<NODE: IsNode + Sync + Sync>(&self, dependency: NODE) {
+        assert_same_ctx(&self.node().sodium_ctx, &dependency.node().sodium_ctx);
         {
             let mut dependencies = self.data().dependencies.write();
             dependencies.push(dependency.box_clone());
@@ -69,6 +97,7 @@ pub trait IsNodeExt: IsNode {
     }
 
     fn add_keep_alive(&self, gc_node: &GcNode) {
+        assert_ctx_of_gc_node(&self.node().sodium_ctx.gc_ctx(), gc_node);
         gc_node.inc_ref();
         let mut keep_alive = self.data().keep_alive.write();
         keep_alive.push(gc_node.clone());
@@ -329,6 +358,7 @@ impl Node {
             *result_forward_ref = Some(Arc::downgrade(&result.data));
         }
         for dependency in dependencies {
+            assert_same_ctx(sodium_ctx, &dependency.node().sodium_ctx);
             let mut dependency_dependents = dependency.data().dependents.write();
             dependency_dependents.push(result.downgrade());
         }

@@ -10,9 +10,21 @@ pub struct Transaction {
     impl_: TransactionImpl,
 }
 
+impl Default for Transaction {
+    fn default() -> Transaction {
+        Transaction::new()
+    }
+}
+
 impl Transaction {
+    /// Create a new scoped transaction on the [ambient
+    /// context][SodiumCtx::current].
+    pub fn new() -> Transaction {
+        Transaction::new_in(&SodiumCtx::current())
+    }
+
     /// Create a new scoped transaction on the given context.
-    pub fn new(sodium_ctx: &SodiumCtx) -> Transaction {
+    pub fn new_in(sodium_ctx: &SodiumCtx) -> Transaction {
         Transaction {
             impl_: TransactionImpl::new(&sodium_ctx.impl_),
         }
