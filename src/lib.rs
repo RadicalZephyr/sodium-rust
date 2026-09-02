@@ -1,5 +1,5 @@
-//! Sodium is a library for doing Functional Reactive Programming
-//! (FRP) in Rust.
+//! `sodium` has been renamed to `sodium-rust`. Please port all users to this crate.
+#![deprecated(since = "0.1.4", note = "renamed back to sodium-rust, see https://crates.io/crates/sodium-rust")]
 
 mod cell;
 mod cell_loop;

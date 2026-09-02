@@ -1,12 +1,9 @@
 # Sodium
-A Functional Reactive Programming (FRP) library for Rust
 
-Avaliable on crates.io: https://crates.io/crates/sodium
+This crate is deprecated following the effective renaming of this
+crate back to the original name of `sodium-rust` in September 2026.
 
-See tests under src/tests for example usage. Sodium objects within lambda expressions are traced via lambda1, lambda2, etc. just like the TypeScript version does.
+Version 0.1.3 was the last non-deprecated release and 0.1.4 is the
+last planned release of the crate under the name `sodium`.
 
-## Pitfalls
-
-### No Global State
-
-You must create a SodiumCtx for your application and keep passing it around in order to create sodium objects.
+The crate lives on under the `sodium-rust` name. See https://crates.io/crates/sodium-rust
