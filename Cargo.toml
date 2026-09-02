@@ -1,6 +1,6 @@
 [package]
 name = "sodium-rust"
-version = "2.1.2"
+version = "2.1.3"
 authors = ["Clinton Selke <clinuxrulz@gmail.com>", "Zefira Shannon <zefira@hey.com>"]
 edition = "2021"
 license = "BSD-3-Clause"
