@@ -7,9 +7,21 @@ pub struct StreamLoop<A> {
     pub impl_: StreamLoopImpl<A>,
 }
 
+impl<A: Send + Clone + 'static> Default for StreamLoop<A> {
+    fn default() -> StreamLoop<A> {
+        StreamLoop::new()
+    }
+}
+
 impl<A: Send + Clone + 'static> StreamLoop<A> {
+    /// Create a new `StreamLoop` in the [ambient
+    /// context][SodiumCtx::current].
+    pub fn new() -> StreamLoop<A> {
+        StreamLoop::new_in(&SodiumCtx::current())
+    }
+
     /// Create a new `StreamLoop` in the given context.
-    pub fn new(sodium_ctx: &SodiumCtx) -> StreamLoop<A> {
+    pub fn new_in(sodium_ctx: &SodiumCtx) -> StreamLoop<A> {
         StreamLoop {
             impl_: StreamLoopImpl::new(&sodium_ctx.impl_),
         }

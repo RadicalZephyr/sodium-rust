@@ -19,6 +19,12 @@ impl<A> Clone for StreamSink<A> {
     }
 }
 
+impl<A: Clone + Send + 'static> Default for StreamSink<A> {
+    fn default() -> StreamSink<A> {
+        StreamSink::new()
+    }
+}
+
 impl<A: Clone + Send + 'static> StreamSink<A> {
     /// Create a `StreamSink` that allows calling `send` on it once
     /// per transaction.
@@ -27,7 +33,13 @@ impl<A: Clone + Send + 'static> StreamSink<A> {
     /// `StreamSink` constructed with `StreamSink::new` it will
     /// panic. If you need to do this then use
     /// [`StreamSink::new_with_coalescer`].
-    pub fn new(sodium_ctx: &SodiumCtx) -> StreamSink<A> {
+    pub fn new() -> StreamSink<A> {
+        StreamSink::new_in(&SodiumCtx::current())
+    }
+
+    /// A variant of [`new`][StreamSink::new] that takes an explicit
+    /// context instead of using the ambient one.
+    pub fn new_in(sodium_ctx: &SodiumCtx) -> StreamSink<A> {
         StreamSink {
             impl_: StreamSinkImpl::new(&sodium_ctx.impl_),
         }
@@ -41,6 +53,15 @@ impl<A: Clone + Send + 'static> StreamSink<A> {
     /// single event using the specified combining function. The
     /// combining function should be _associative_.
     pub fn new_with_coalescer<COALESCER: FnMut(&A, &A) -> A + Send + 'static>(
+        coalescer: COALESCER,
+    ) -> StreamSink<A> {
+        StreamSink::new_with_coalescer_in(&SodiumCtx::current(), coalescer)
+    }
+
+    /// A variant of
+    /// [`new_with_coalescer`][StreamSink::new_with_coalescer] that takes
+    /// an explicit context instead of using the ambient one.
+    pub fn new_with_coalescer_in<COALESCER: FnMut(&A, &A) -> A + Send + 'static>(
         sodium_ctx: &SodiumCtx,
         coalescer: COALESCER,
     ) -> StreamSink<A> {

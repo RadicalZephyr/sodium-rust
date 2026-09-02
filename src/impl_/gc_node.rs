@@ -91,6 +91,11 @@ impl GcCtx {
         k(&mut data)
     }
 
+    /// Are these two handles clones of the same underlying collector?
+    pub fn ptr_eq(&self, other: &GcCtx) -> bool {
+        Arc::ptr_eq(&self.data, &other.data)
+    }
+
     pub fn make_id(&self) -> u32 {
         self.with_data(|data: &mut GcCtxData| {
             let id = data.next_id;
@@ -341,6 +346,11 @@ impl GcCtx {
 }
 
 impl GcNode {
+    /// The collector this node was created in.
+    pub fn gc_ctx(&self) -> &GcCtx {
+        &self.gc_ctx
+    }
+
     pub fn new<
         DECONSTRUCTOR: 'static + Fn() + Send + Sync,
         TRACE: 'static + Fn(&mut Tracer) + Send + Sync,

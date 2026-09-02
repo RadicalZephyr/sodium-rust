@@ -21,9 +21,21 @@ impl<A> Clone for CellLoop<A> {
     }
 }
 
+impl<A: Send + Clone + 'static> Default for CellLoop<A> {
+    fn default() -> CellLoop<A> {
+        CellLoop::new()
+    }
+}
+
 impl<A: Send + Clone + 'static> CellLoop<A> {
+    /// Create a new `CellLoop` in the [ambient
+    /// context][SodiumCtx::current].
+    pub fn new() -> CellLoop<A> {
+        CellLoop::new_in(&SodiumCtx::current())
+    }
+
     /// Create a new `CellLoop` in the given context.
-    pub fn new(sodium_ctx: &SodiumCtx) -> CellLoop<A> {
+    pub fn new_in(sodium_ctx: &SodiumCtx) -> CellLoop<A> {
         CellLoop {
             impl_: CellLoopImpl::new(&sodium_ctx.impl_),
         }

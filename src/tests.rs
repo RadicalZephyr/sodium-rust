@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod ambient_test;
 mod mem_test;
 mod node_test;
 

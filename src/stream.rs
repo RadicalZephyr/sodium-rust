@@ -106,11 +106,30 @@ impl<
     }
 }
 
+impl<A: Clone + Send + 'static> Default for Stream<A> {
+    fn default() -> Stream<A> {
+        Stream::new()
+    }
+}
+
 impl<A: Clone + Send + 'static> Stream<A> {
-    /// Create a `Stream` that will never fire.
-    pub fn new(sodium_ctx: &SodiumCtx) -> Stream<A> {
+    /// Create a `Stream` that will never fire, in the [ambient
+    /// context][SodiumCtx::current].
+    pub fn new() -> Stream<A> {
+        Stream::new_in(&SodiumCtx::current())
+    }
+
+    /// Create a `Stream` that will never fire, in the given context.
+    pub fn new_in(sodium_ctx: &SodiumCtx) -> Stream<A> {
         Stream {
             impl_: StreamImpl::new(&sodium_ctx.impl_),
+        }
+    }
+
+    /// The context this `Stream` belongs to.
+    pub fn sodium_ctx(&self) -> SodiumCtx {
+        SodiumCtx {
+            impl_: self.impl_.sodium_ctx(),
         }
     }
 
