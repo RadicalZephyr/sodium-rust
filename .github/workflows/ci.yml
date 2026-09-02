@@ -27,6 +27,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main writes to the cache; PR branches read from it. Keeps
+          # short-lived branches from evicting main's entry under the repo
+          # cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace
 
   clippy:
@@ -37,6 +43,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main writes to the cache; PR branches read from it. Keeps
+          # short-lived branches from evicting main's entry under the repo
+          # cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
