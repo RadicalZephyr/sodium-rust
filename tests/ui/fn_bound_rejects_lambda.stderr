@@ -1,4 +1,4 @@
-error[E0277]: expected a `FnMut(&i32)` closure, found `Lambda<{closure@$DIR/tests/ui/fn_bound_rejects_lambda.rs:48:12: 48:21}>`
+error[E0277]: expected an `FnMut(&i32)` closure, found `Lambda<{closure@$DIR/tests/ui/fn_bound_rejects_lambda.rs:48:12: 48:21}>`
   --> tests/ui/fn_bound_rejects_lambda.rs:47:11
    |
 47 |       s.map(Lambda {
