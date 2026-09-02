@@ -4,7 +4,7 @@
 // This is the regression guard for the `FnMut`/`Fn` bounds. If any of these
 // methods is moved back onto an `IsLambda`-style bound, this stops compiling.
 
-use sodium::{Cell, Dep, Listener, Stream};
+use sodium_rust::{Cell, Dep, Listener, Stream};
 
 pub fn chained(s: &Stream<i32>) -> Stream<i32> {
     s.map(|a| *a + 1)

@@ -7,4 +7,4 @@ edition = "2021"
 
 [dependencies]
 coz = "0.1"
-sodium = { path = ".." }
+sodium-rust = { path = ".." }

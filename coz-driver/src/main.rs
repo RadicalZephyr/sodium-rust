@@ -1,6 +1,6 @@
 use std::{hint::black_box, sync::mpsc, thread};
 
-use sodium::{Cell, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
+use sodium_rust::{Cell, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
 
 fn main() {
     let sodium_ctx = SodiumCtx::new();

@@ -28,7 +28,7 @@
 //! and reduces the *old* failure to a few lines of standalone Rust so the
 //! reasoning below stays checked rather than merely asserted.
 
-use sodium::{Cell, Dep, Listener, SodiumCtx, Stream};
+use sodium_rust::{Cell, Dep, Listener, SodiumCtx, Stream};
 use std::sync::{Arc, Mutex};
 
 /// Test scaffolding: drain a stream into a vector.
