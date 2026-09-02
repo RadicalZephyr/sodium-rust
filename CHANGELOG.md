@@ -9,11 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- This CHANGELOG file.
-- Dependency on [parking-lot].
 - New `filter_map` combinator.
-
-[parking-lot]: https://crates.io/crates/parking-lot
 
 ### Changed
 
@@ -43,7 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since they appear in the public `*_with_deps` signatures.
 - `Cell::listen_weak` now honours declared dependencies, matching
   `Stream::listen_weak` and `Cell::listen`.
-- Various small performance improvements.
 
 ### Added
 
@@ -55,6 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `accum_lazy_with_deps`, `listen_with_deps`, `listen_weak_with_deps`, and
   `Cell::map_with_deps`, `lift2_with_deps`..`lift6_with_deps`,
   `listen_with_deps`, `listen_weak_with_deps`.
+
+## [2.1.3] - 2026-09-02
+
+### Added
+
+- This CHANGELOG file.
+- Dependency on [parking-lot].
+
+[parking-lot]: https://crates.io/crates/parking-lot
+
+### Changed
+
+- Various small performance improvements.
 
 ## [2.1.2] - 2022-11-27
 
