@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --workspace
+
       - name: Audit Check
         uses: rustsec/audit-check@v2
         with:
