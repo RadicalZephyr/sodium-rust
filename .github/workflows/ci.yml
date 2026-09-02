@@ -56,6 +56,33 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Read the MSRV out of Cargo.toml rather than repeating it here. Hard
+      # coding it means a future rust-version bump can silently leave this job
+      # checking an older toolchain than the crate claims to support, which
+      # passes while proving nothing.
+      - id: msrv
+        run: |
+          msrv=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "sodium-rust") | .rust_version')
+          echo "Cargo.toml declares rust-version $msrv"
+          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The library alone, deliberately. rust-version describes what consumers
+      # of the published crate need, and the dev-dependency tree reaches
+      # edition-2024 manifests (trybuild -> toml -> serde_spanned) that the
+      # MSRV's cargo cannot even parse.
+      - run: cargo check -p sodium-rust
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
