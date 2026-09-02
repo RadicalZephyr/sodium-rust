@@ -18,7 +18,7 @@ jobs:
     name: Advisories
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # We deliberately do not commit a Cargo.lock, so this resolves fresh
       # every run -- which is the point of the nightly schedule: catch newly
