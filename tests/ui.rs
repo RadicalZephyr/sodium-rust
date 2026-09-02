@@ -12,6 +12,15 @@
 //!   so the reasoning in `tests/closure_type_inference.rs` stays checked rather
 //!   than merely asserted.
 //!
+//! The `fn_bound_*_state` pair and `fnmut_bound_rejects_shared_reference.rs`
+//! belong to a separate question: whether the combinators should move from
+//! `FnMut` to `Fn` ([issue #48]). They are reductions for the same reason --
+//! this crate is `FnMut`-bounded, so a `Fn`-bounded combinator has to be
+//! written out to be compiled against. `tests/fn_vs_fnmut.rs` is their runtime
+//! half and carries the findings.
+//!
+//! [issue #48]: https://github.com/SodiumFRP/sodium-rust/issues/48
+//!
 //! Expected output for a failing case lives beside it in a `.stderr` file. To
 //! refresh them after a deliberate change:
 //!
@@ -42,6 +51,10 @@ fn diagnostics(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/single_impl.rs");
     t.pass("tests/ui/fn_bound_rescues_closure.rs");
     t.compile_fail("tests/ui/fn_bound_rejects_lambda.rs");
+    // `FnMut` vs `Fn` on the combinators -- see tests/fn_vs_fnmut.rs.
+    t.pass("tests/ui/fn_bound_accepts_shared_state.rs");
+    t.compile_fail("tests/ui/fn_bound_rejects_captured_state.rs");
+    t.compile_fail("tests/ui/fnmut_bound_rejects_shared_reference.rs");
 }
 
 #[rustversion::not(stable)]
