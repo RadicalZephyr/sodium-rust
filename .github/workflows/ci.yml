@@ -6,6 +6,12 @@ on:
 
 name: Test sodium-rust
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are wasted work, but let pushes to main finish so every
+  # commit there keeps its own pass/fail result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
 
   test:
