@@ -1,8 +1,22 @@
-use std::{hint::black_box, sync::mpsc, thread};
+//! Drives sodium-rust under the [`coz`] causal profiler.
+//!
+//! `coz` is Linux-only, so this program is too; elsewhere it builds to a stub
+//! that says so, which keeps `cargo test --workspace` working on every
+//! platform.
+//!
+//! [`coz`]: https://github.com/plasma-umass/coz
 
-use sodium_rust::{Cell, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
-
+#[cfg(not(target_os = "linux"))]
 fn main() {
+    eprintln!("coz-driver does nothing here: the coz causal profiler is Linux-only.");
+}
+
+#[cfg(target_os = "linux")]
+fn main() {
+    use std::{hint::black_box, sync::mpsc, thread};
+
+    use sodium_rust::{Cell, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
+
     let sodium_ctx = SodiumCtx::new();
     let sodium_ctx = &sodium_ctx;
 

@@ -1,0 +1,37 @@
+# Configuration for cargo-deny. See https://embarkstudios.github.io/cargo-deny/
+#
+# Both the PR-time `cargo-deny` job and the scheduled `Security Audit` workflow
+# read this file, so advisory ignores only need to be listed once.
+
+[graph]
+# Match the `--all-features` the CI jobs pass, so a local `cargo deny check`
+# sees the same crate graph CI does.
+all-features = true
+
+[advisories]
+ignore = [
+    # `atty` is unmaintained. It reaches us only through the dev-dependencies
+    # criterion 0.4 and env_logger 0.9; bumping those to criterion 0.8 and
+    # env_logger 0.11 drops it from the graph entirely, at which point this
+    # entry should be deleted.
+    "RUSTSEC-2024-0375",
+]
+
+[licenses]
+# sodium-rust is BSD-3-Clause; everything we pull in must be compatible with
+# redistributing it under that license.
+allow = [
+    "Apache-2.0",
+    "BSD-3-Clause",
+    "MIT",
+]
+
+[bans]
+# Duplicate versions are usually not our fault and not worth failing a build
+# over, but we do want to see them.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

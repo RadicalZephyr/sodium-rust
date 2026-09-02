@@ -6,5 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-coz = "0.1"
 sodium-rust = { path = ".." }
+
+# `coz` calls sigaltstack/mmap unconditionally, so it does not build off
+# POSIX, and its counter lookup is itself gated to Linux -- on any other
+# platform the profiler records nothing. Keeping the dependency Linux-only
+# lets `cargo test --workspace` succeed everywhere.
+[target.'cfg(target_os = "linux")'.dependencies]
+coz = "0.1"

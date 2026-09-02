@@ -6,45 +6,112 @@ on:
 
 name: Test sodium-rust
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are wasted work, but let pushes to main finish so every
+  # commit there keeps its own pass/fail result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
 
   test:
-    name: Tests
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.toolchain }} on ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
+      # A failure is usually specific to one platform or toolchain; let the
+      # rest report instead of cancelling them.
+      fail-fast: false
       matrix:
+        # The toolchain matrix runs on Linux. macOS and Windows get stable
+        # only -- they are there to catch platform-specific breakage in the
+        # GC's hand-written Send/Sync impls, not to re-test rustc versions.
+        os:
+          - ubuntu-latest
         toolchain:
           - stable
           - beta
         experimental:
           - false
         include:
-          - toolchain: nightly
+          - os: ubuntu-latest
+            toolchain: nightly
             experimental: true
+          - os: macos-latest
+            toolchain: stable
+            experimental: false
+          - os: windows-latest
+            toolchain: stable
+            experimental: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main writes to the cache; PR branches read from it. Keeps
+          # short-lived branches from evicting main's entry under the repo
+          # cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo test --workspace
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Read the MSRV out of Cargo.toml rather than repeating it here. Hard
+      # coding it means a future rust-version bump can silently leave this job
+      # checking an older toolchain than the crate claims to support, which
+      # passes while proving nothing.
+      - id: msrv
+        run: |
+          msrv=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "sodium-rust") | .rust_version')
+          echo "Cargo.toml declares rust-version $msrv"
+          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The library alone, deliberately. rust-version describes what consumers
+      # of the published crate need, and the dev-dependency tree reaches
+      # edition-2024 manifests (trybuild -> toml -> serde_spanned) that the
+      # MSRV's cargo cannot even parse.
+      - run: cargo check -p sodium-rust
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main writes to the cache; PR branches read from it. Keeps
+          # short-lived branches from evicting main's entry under the repo
+          # cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --all -- --check
+
+  cargo-deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
