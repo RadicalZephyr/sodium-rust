@@ -94,7 +94,7 @@ impl<A: Clone + Send + 'static> StreamLoop<A> {
             {
                 let s = s.clone();
                 let s_out = Stream::downgrade(&data.stream);
-                let mut node_update = data.stream.data().update.write();
+                let mut node_update = data.stream.data().update.lock();
                 *node_update = Box::new(move || {
                     s.with_firing_op(|firing_op: &mut Option<A>| {
                         if let Some(ref firing) = firing_op {

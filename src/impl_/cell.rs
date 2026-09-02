@@ -185,7 +185,7 @@ impl<A: Send + 'static> Cell<A> {
             {
                 let c = c.clone();
                 sodium_ctx.pre_eot(move || {
-                    let mut update = node.data.update.write();
+                    let mut update = node.data.update.lock();
                     let update: &mut Box<_> = &mut *update;
                     update();
                     // c captured, but not used so that update() will not crash here
@@ -246,7 +246,7 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
         B: Clone + Send + 'static,
-        FN: IsLambda1<A, B> + Send + Sync + 'static,
+        FN: IsLambda1<A, B> + Send + 'static,
     {
         let self_ = self.clone();
         let f_deps = lambda1_deps(&f);
@@ -591,7 +591,7 @@ impl<A: Send + 'static> Cell<A> {
                 Dep::new(node2.gc_node.clone()),
             ]);
             {
-                let mut update = node1.data.update.write();
+                let mut update = node1.data.update.lock();
                 *update = Box::new(node1_update);
             }
             {
@@ -607,7 +607,7 @@ impl<A: Send + 'static> Cell<A> {
                     });
                 };
                 {
-                    let mut update = node2.data.update.write();
+                    let mut update = node2.data.update.lock();
                     *update = Box::new(node2_update);
                 }
             }
@@ -616,7 +616,7 @@ impl<A: Send + 'static> Cell<A> {
         .hold_lazy(Lazy::new(move || cca2.sample().sample()))
     }
 
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener
+    pub fn listen_weak<K: IsLambda1<A, ()> + Send + 'static>(&self, k: K) -> Listener
     where
         A: Clone,
     {
@@ -624,7 +624,7 @@ impl<A: Send + 'static> Cell<A> {
             .transaction(|| self.value().listen_weak(k))
     }
 
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener
+    pub fn listen<K: IsLambda1<A, ()> + Send + 'static>(&self, k: K) -> Listener
     where
         A: Clone,
     {

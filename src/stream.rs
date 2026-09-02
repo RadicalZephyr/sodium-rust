@@ -13,6 +13,32 @@ use crate::Lazy;
 /// Also known in other FRP systems as an _event_ (which would contain
 /// _event occurrences_), an _event stream_, an _observable_, or a
 /// _signal_.
+///
+/// # Type requirements
+///
+/// An event value needs to be `Send + 'static`, and nothing more. The
+/// graph is reference-counted, shared, and usable from any thread, so
+/// every value it stores has to be able to move between threads and
+/// to outlive the scope that created it.
+///
+/// `Clone` is only required by the combinators that hand the same
+/// value on to more than one place: [`filter`][Stream::filter],
+/// [`merge`][Stream::merge] and [`or_else`][Stream::or_else],
+/// [`hold`][Stream::hold], [`gate`][Stream::gate],
+/// [`once`][Stream::once],
+/// [`Operational::defer`][crate::Operational::defer],
+/// [`StreamLoop`][crate::StreamLoop] and [`Router`][crate::Router].
+/// Combinators whose closure produces a fresh value, such as
+/// [`map`][Stream::map], [`filter_map`][Stream::filter_map],
+/// [`snapshot`][Stream::snapshot] and
+/// [`split_enum2`][Stream::split_enum2], do not need it, and neither
+/// do the sinks or the listeners.
+///
+/// A [`Cell`] does need `Clone`, because its value is read from many
+/// places and each reader gets its own copy. That includes the state
+/// of [`accum`][Stream::accum] and [`collect`][Stream::collect]. To
+/// carry a type that is not `Clone`, or is expensive to clone, through
+/// a cell, wrap it in an [`Arc`][std::sync::Arc].
 pub struct Stream<A> {
     pub impl_: StreamImpl<A>,
 }
@@ -25,12 +51,12 @@ impl<A> Clone for Stream<A> {
     }
 }
 
-impl<A: Clone + Send + 'static> Stream<A> {
+impl<A: Send + 'static> Stream<A> {
     pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
     where
-        B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+        B: Send + 'static,
+        C: Send + 'static,
+        FN: Fn(&A) -> Enum2<B, C> + Send + 'static,
     {
         let (b, c) = self.impl_.split_enum2(f);
 
@@ -41,10 +67,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     pub fn split_enum3<B, C, D, FN>(&self, f: FN) -> (Stream<B>, Stream<C>, Stream<D>)
     where
-        B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        D: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
+        B: Send + 'static,
+        C: Send + 'static,
+        D: Send + 'static,
+        FN: Fn(&A) -> Enum3<B, C, D> + Send + 'static,
     {
         let (b, c, d) = self.impl_.split_enum3(f);
 
@@ -92,10 +118,8 @@ where
     }
 }
 
-impl<
-        A: Clone + Send + Sync + 'static,
-        COLLECTION: IntoIterator<Item = A> + Clone + Send + 'static,
-    > Stream<COLLECTION>
+impl<A: Send + 'static, COLLECTION: IntoIterator<Item = A> + Clone + Send + 'static>
+    Stream<COLLECTION>
 {
     /// Flatten a `Stream` of a collection of `A` into a `Stream` of
     /// single `A`s.
@@ -106,7 +130,7 @@ impl<
     }
 }
 
-impl<A: Clone + Send + 'static> Stream<A> {
+impl<A: Send + 'static> Stream<A> {
     /// Create a `Stream` that will never fire.
     pub fn new(sodium_ctx: &SodiumCtx) -> Stream<A> {
         Stream {
@@ -132,8 +156,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// the current transaction.
     pub fn snapshot<
         B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        FN: FnMut(&A, &B) -> C + Send + Sync + 'static,
+        C: Send + 'static,
+        FN: FnMut(&A, &B) -> C + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -149,8 +173,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// needed.
     pub fn snapshot_with_deps<
         B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        FN: FnMut(&A, &B) -> C + Send + Sync + 'static,
+        C: Send + 'static,
+        FN: FnMut(&A, &B) -> C + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -174,8 +198,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn snapshot3<
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
-        D: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C) -> D + Send + Sync + 'static,
+        D: Send + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -193,8 +217,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn snapshot3_with_deps<
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
-        D: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C) -> D + Send + Sync + 'static,
+        D: Send + 'static,
+        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -213,8 +237,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
-        E: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D) -> E + Send + Sync + 'static,
+        E: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -234,8 +258,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         B: Send + Clone + 'static,
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
-        E: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D) -> E + Send + Sync + 'static,
+        E: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -258,8 +282,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
-        F: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + Sync + 'static,
+        F: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -282,8 +306,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         C: Send + Clone + 'static,
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
-        F: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + Sync + 'static,
+        F: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -314,8 +338,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
-        G: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + Sync + 'static,
+        G: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -340,8 +364,8 @@ impl<A: Clone + Send + 'static> Stream<A> {
         D: Send + Clone + 'static,
         E: Send + Clone + 'static,
         F: Send + Clone + 'static,
-        G: Send + Clone + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + Sync + 'static,
+        G: Send + 'static,
+        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -374,10 +398,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// [`Cell::sample`], in which case it's equivalent to
     /// [`snapshot`][Stream::snapshot]ing the cell. In addition, the
     /// function must be referentially transparent.
-    pub fn map<B: Send + Clone + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
-        &self,
-        f: FN,
-    ) -> Stream<B> {
+    pub fn map<B: Send + 'static, FN: FnMut(&A) -> B + Send + 'static>(&self, f: FN) -> Stream<B> {
         self.map_with_deps(f, Vec::new())
     }
 
@@ -394,7 +415,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// dependency in the network itself, with
     /// [`snapshot`][Stream::snapshot] and friends, which do this
     /// bookkeeping for you.
-    pub fn map_with_deps<B: Send + Clone + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+    pub fn map_with_deps<B: Send + 'static, FN: FnMut(&A) -> B + Send + 'static>(
         &self,
         f: FN,
         deps: Vec<Dep>,
@@ -405,12 +426,15 @@ impl<A: Clone + Send + 'static> Stream<A> {
     }
 
     /// Transform this `Stream`'s event values into the specified constant value.
-    pub fn map_to<B: Send + Sync + Clone + 'static>(&self, b: B) -> Stream<B> {
+    pub fn map_to<B: Send + Clone + 'static>(&self, b: B) -> Stream<B> {
         self.map(move |_| b.clone())
     }
 
     /// Return a `Stream` that only outputs events for which the predicate returns `true`.
-    pub fn filter<PRED: FnMut(&A) -> bool + Send + Sync + 'static>(&self, pred: PRED) -> Stream<A> {
+    pub fn filter<PRED: FnMut(&A) -> bool + Send + 'static>(&self, pred: PRED) -> Stream<A>
+    where
+        A: Clone,
+    {
         self.filter_with_deps(pred, Vec::new())
     }
 
@@ -419,11 +443,14 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// See [`map_with_deps`][Stream::map_with_deps] for when this is
     /// needed.
-    pub fn filter_with_deps<PRED: FnMut(&A) -> bool + Send + Sync + 'static>(
+    pub fn filter_with_deps<PRED: FnMut(&A) -> bool + Send + 'static>(
         &self,
         pred: PRED,
         deps: Vec<Dep>,
-    ) -> Stream<A> {
+    ) -> Stream<A>
+    where
+        A: Clone,
+    {
         Stream {
             impl_: self.impl_.filter(lambda1(pred, deps)),
         }
@@ -499,10 +526,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// assert_eq!([1, 5], &out[..]);
     /// l.unlisten();
     /// ```
-    pub fn filter_map<
-        B: Send + Clone + 'static,
-        FN: FnMut(&A) -> Option<B> + Send + Sync + 'static,
-    >(
+    pub fn filter_map<B: Send + 'static, FN: FnMut(&A) -> Option<B> + Send + 'static>(
         &self,
         f: FN,
     ) -> Stream<B> {
@@ -514,10 +538,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// See [`map_with_deps`][Stream::map_with_deps] for when this is
     /// needed.
-    pub fn filter_map_with_deps<
-        B: Send + Clone + 'static,
-        FN: FnMut(&A) -> Option<B> + Send + Sync + 'static,
-    >(
+    pub fn filter_map_with_deps<B: Send + 'static, FN: FnMut(&A) -> Option<B> + Send + 'static>(
         &self,
         f: FN,
         deps: Vec<Dep>,
@@ -538,7 +559,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// `s1.merge(s2, |l, _r| l)`. The name `or_else` is used instead
     /// of `merge` to make it clear that care should be taken because
     /// events can be dropped.
-    pub fn or_else(&self, s2: &Stream<A>) -> Stream<A> {
+    pub fn or_else(&self, s2: &Stream<A>) -> Stream<A>
+    where
+        A: Clone,
+    {
         self.merge(s2, |lhs, _rhs| lhs.clone())
     }
 
@@ -552,11 +576,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// transaction. The event from `self` will appear at the left
     /// input of the combining function, and the event from `s2` will
     /// appear at the right.
-    pub fn merge<FN: FnMut(&A, &A) -> A + Send + Sync + 'static>(
-        &self,
-        s2: &Stream<A>,
-        f: FN,
-    ) -> Stream<A> {
+    pub fn merge<FN: FnMut(&A, &A) -> A + Send + 'static>(&self, s2: &Stream<A>, f: FN) -> Stream<A>
+    where
+        A: Clone,
+    {
         self.merge_with_deps(s2, f, Vec::new())
     }
 
@@ -565,12 +588,15 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// See [`map_with_deps`][Stream::map_with_deps] for when this is
     /// needed.
-    pub fn merge_with_deps<FN: FnMut(&A, &A) -> A + Send + Sync + 'static>(
+    pub fn merge_with_deps<FN: FnMut(&A, &A) -> A + Send + 'static>(
         &self,
         s2: &Stream<A>,
         f: FN,
         deps: Vec<Dep>,
-    ) -> Stream<A> {
+    ) -> Stream<A>
+    where
+        A: Clone,
+    {
         Stream {
             impl_: self.impl_.merge(&s2.impl_, lambda2(f, deps)),
         }
@@ -578,7 +604,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     /// Returns a cell with the specified initial value, which is
     /// updated by this stream's event values.
-    pub fn hold(&self, a: A) -> Cell<A> {
+    pub fn hold(&self, a: A) -> Cell<A>
+    where
+        A: Clone,
+    {
         Cell {
             impl_: self.impl_.hold(a),
         }
@@ -586,7 +615,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     /// A variant of [`hold`][Stream::hold] that uses an initial value
     /// returned by [`Cell::sample_lazy`].
-    pub fn hold_lazy(&self, a: Lazy<A>) -> Cell<A> {
+    pub fn hold_lazy(&self, a: Lazy<A>) -> Cell<A>
+    where
+        A: Clone,
+    {
         Cell {
             impl_: self.impl_.hold_lazy(a),
         }
@@ -594,7 +626,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     /// Return a stream that only outputs events from the input stream
     /// when the specified cell's value is true.
-    pub fn gate(&self, cpred: &Cell<bool>) -> Stream<A> {
+    pub fn gate(&self, cpred: &Cell<bool>) -> Stream<A>
+    where
+        A: Clone,
+    {
         let cpred = cpred.clone();
         let cpred_dep = cpred.to_dep();
         self.filter_with_deps(move |_| cpred.sample(), vec![cpred_dep])
@@ -603,7 +638,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// Return a stream that outputs only one value, which is the next
     /// event of the input stream, starting from the transaction in
     /// `once` was invoked.
-    pub fn once(&self) -> Stream<A> {
+    pub fn once(&self) -> Stream<A>
+    where
+        A: Clone,
+    {
         Stream {
             impl_: self.impl_.once(),
         }
@@ -616,7 +654,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + 'static,
     {
         self.collect_with_deps(init_state, f, Vec::new())
     }
@@ -630,7 +668,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + 'static,
     {
         self.collect_lazy_with_deps(Lazy::new(move || init_state.clone()), f, deps)
     }
@@ -641,7 +679,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + 'static,
     {
         self.collect_lazy_with_deps(init_state, f, Vec::new())
     }
@@ -660,7 +698,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> (B, S) + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> (B, S) + Send + 'static,
     {
         Stream {
             impl_: self.impl_.collect_lazy(init_state, lambda2(f, deps)),
@@ -678,7 +716,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum<S, F>(&self, init_state: S, f: F) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + 'static,
     {
         self.accum_with_deps(init_state, f, Vec::new())
     }
@@ -691,7 +729,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum_with_deps<S, F>(&self, init_state: S, f: F, deps: Vec<Dep>) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + 'static,
     {
         self.accum_lazy_with_deps(Lazy::new(move || init_state.clone()), f, deps)
     }
@@ -701,7 +739,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum_lazy<S, F>(&self, init_state: Lazy<S>, f: F) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + 'static,
     {
         self.accum_lazy_with_deps(init_state, f, Vec::new())
     }
@@ -714,7 +752,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     pub fn accum_lazy_with_deps<S, F>(&self, init_state: Lazy<S>, f: F, deps: Vec<Dep>) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: FnMut(&A, &S) -> S + Send + Sync + 'static,
+        F: FnMut(&A, &S) -> S + Send + 'static,
     {
         Cell {
             impl_: self.impl_.accum_lazy(init_state, lambda2(f, deps)),
@@ -727,7 +765,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// With [`listen`][Stream::listen] the listener is only
     /// deregistered if [`Listener::unlisten`] is called explicitly.
-    pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(&A) + Send + 'static>(&self, k: K) -> Listener {
         self.listen_weak_with_deps(k, Vec::new())
     }
 
@@ -736,7 +774,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// See [`map_with_deps`][Stream::map_with_deps] for when this is
     /// needed.
-    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + 'static>(
         &self,
         k: K,
         deps: Vec<Dep>,
@@ -758,7 +796,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// handler should not block. It also is not allowed to use
     /// [`CellSink::send`][crate::CellSink::send] or
     /// [`StreamSink::send`][crate::StreamSink::send] in the handler.
-    pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Send + 'static>(&self, k: K) -> Listener {
         self.listen_with_deps(k, Vec::new())
     }
 
@@ -767,7 +805,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
     ///
     /// See [`map_with_deps`][Stream::map_with_deps] for when this is
     /// needed.
-    pub fn listen_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+    pub fn listen_with_deps<K: FnMut(&A) + Send + 'static>(
         &self,
         k: K,
         deps: Vec<Dep>,

@@ -19,7 +19,7 @@ impl<A> Clone for StreamSink<A> {
     }
 }
 
-impl<A: Clone + Send + 'static> StreamSink<A> {
+impl<A: Send + 'static> StreamSink<A> {
     /// Create a `StreamSink` that allows calling `send` on it once
     /// per transaction.
     ///

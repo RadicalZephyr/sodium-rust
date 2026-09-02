@@ -36,6 +36,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stream.map_with_deps(move |a| *a + c.sample(), vec![c.to_dep()])
   ```
 
+- The `Clone` bound on event values is now per method rather than blanket.
+  A `Stream<A>` needs only `A: Send + 'static`. `Clone` is required by the
+  combinators that forward one value to more than one place (`filter`,
+  `merge` and `or_else`, `hold`, `gate`, `once`, `Operational::defer`,
+  `StreamLoop`, `Router`) and by the `Option`/`Result` projections
+  (`filter_option`, `split_opt`, `split_res`). The sinks, `map`,
+  `filter_map`, `snapshot*`, `split_enum*`, `listen*`, and the inputs of
+  `collect` and `accum` accept values that are not `Clone`, and the values
+  produced by `map`, `filter_map` and `snapshot*` need not be `Clone` either.
+  `Cell` values still need `Clone`: a cell is read from many places, and each
+  reader gets its own copy.
+- Closures passed to combinators and listeners need only be `Send`, not
+  `Send + Sync`. The `Sync` requirement was an artefact of storing node
+  closures in an `RwLock`; they now sit behind a `Mutex`, which needs its
+  contents to be `Send` only. A listener can now capture, for instance, a
+  `Box<dyn FnMut(..) + Send>`.
+- The value given to `Stream::map_to`, the items produced by `Stream::split`
+  and the keys of a `Router` no longer need to be `Sync`.
+- `Stream::split` no longer clones each item; items are moved into the
+  post-transaction send instead.
 - `IsLambda1`..`IsLambda6`, `Lambda` and `lambda1`..`lambda6` remain exported but
   are now `#[doc(hidden)]`; they are the mechanism behind `*_with_deps` rather
   than part of the public surface.

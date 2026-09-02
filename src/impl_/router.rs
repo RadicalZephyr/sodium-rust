@@ -1,22 +1,23 @@
 use crate::impl_::node::{IsNode, IsWeakNode, Node, WeakNode};
 use crate::impl_::sodium_ctx::{SodiumCtx, SodiumCtxData};
 use crate::impl_::stream::{Stream, WeakStream};
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::hash::Hash;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::name::NodeName;
 use super::node::IsNodeExt;
 
 pub struct Router<A, K> {
     sodium_ctx: SodiumCtx,
-    table: Arc<RwLock<HashMap<K, WeakStream<A>>>>,
+    table: Arc<Mutex<HashMap<K, WeakStream<A>>>>,
     node: Node,
 }
 
 pub struct WeakRouter<A, K> {
     sodium_ctx: SodiumCtx,
-    table: Arc<RwLock<HashMap<K, WeakStream<A>>>>,
+    table: Arc<Mutex<HashMap<K, WeakStream<A>>>>,
     node: WeakNode,
 }
 
@@ -40,7 +41,7 @@ impl<A, K> Clone for WeakRouter<A, K> {
     }
 }
 
-impl<A: Send + 'static, K: Send + Sync + 'static> IsNode for Router<A, K> {
+impl<A: Send + 'static, K: Send + 'static> IsNode for Router<A, K> {
     fn node(&self) -> &Node {
         &self.node
     }
@@ -58,7 +59,7 @@ impl<A: Send + 'static, K: Send + Sync + 'static> IsNode for Router<A, K> {
     }
 }
 
-impl<A: Send + 'static, K: Send + Sync + 'static> IsWeakNode for WeakRouter<A, K> {
+impl<A: Send + 'static, K: Send + 'static> IsWeakNode for WeakRouter<A, K> {
     fn node(&self) -> &WeakNode {
         &self.node
     }
@@ -84,14 +85,14 @@ impl<A, K> Router<A, K> {
     pub fn new(
         sodium_ctx: &SodiumCtx,
         in_stream: &Stream<A>,
-        selector: impl Fn(&A) -> Vec<K> + Send + Sync + 'static,
+        selector: impl Fn(&A) -> Vec<K> + Send + 'static,
     ) -> Router<A, K>
     where
         A: Clone + Send + 'static,
-        K: Send + Sync + Eq + Hash + 'static,
+        K: Send + Eq + Hash + 'static,
     {
         let node;
-        let table = Arc::new(RwLock::new(HashMap::<K, WeakStream<A>>::new()));
+        let table = Arc::new(Mutex::new(HashMap::<K, WeakStream<A>>::new()));
         {
             let sodium_ctx2 = sodium_ctx.clone();
             let table = table.clone();
@@ -108,7 +109,7 @@ impl<A, K> Router<A, K> {
                     });
                     if let Some((keys, firing)) = keys_firing_op {
                         for key in keys {
-                            let mut table = table.write().unwrap();
+                            let mut table = table.lock();
                             let mut remove_it = false;
                             if let Some(weak_stream) = table.get(&key) {
                                 if let Some(stream) = weak_stream.upgrade() {
@@ -140,9 +141,9 @@ impl<A, K> Router<A, K> {
     pub fn filter_matches(&self, k: &K) -> Stream<A>
     where
         A: Clone + Send + 'static,
-        K: Clone + Send + Sync + Eq + Hash + 'static,
+        K: Clone + Send + Eq + Hash + 'static,
     {
-        let mut table = self.table.write().unwrap();
+        let mut table = self.table.lock();
         let existing_op;
         if let Some(weak_stream) = table.get(k) {
             if let Some(stream) = weak_stream.upgrade() {
@@ -163,9 +164,9 @@ impl<A, K> Router<A, K> {
                 let table = self.table.clone();
                 let k = k.clone();
                 let weak_s = Stream::downgrade(&s);
-                s.node().data().cleanups.write().push(Box::new(move || {
+                s.node().data().cleanups.lock().push(Box::new(move || {
                     let _ = &weak_s;
-                    let mut table = table.write().unwrap();
+                    let mut table = table.lock();
                     let mut remove_it = false;
                     if let Some(weak_stream) = table.get(&k) {
                         if weak_stream.data.ptr_eq(&weak_s.data) {

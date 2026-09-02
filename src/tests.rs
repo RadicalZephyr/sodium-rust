@@ -432,7 +432,7 @@ fn deltas_with_initial<A, F, R>(sodium_ctx: &SodiumCtx, ca: &Cell<A>, a: A, f: F
 where
     A: 'static + Clone + Send,
     R: 'static + Clone + Send,
-    F: 'static + Send + Sync + Fn(&A, &A) -> R,
+    F: 'static + Send + Fn(&A, &A) -> R,
 {
     sodium_ctx.transaction(|| {
         let s = ca.value();

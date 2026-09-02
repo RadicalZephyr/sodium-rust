@@ -1,3 +1,4 @@
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -149,12 +150,16 @@ pub struct Node {
 pub struct NodeData {
     pub visited: AtomicBool,
     pub changed: AtomicBool,
-    pub update: RwLock<Box<dyn FnMut() + Send + Sync>>,
+    // `Mutex` rather than `RwLock`, deliberately: an `FnMut` is only ever
+    // called through exclusive access, and `Mutex<T>: Sync` needs only
+    // `T: Send`. That is what lets the closures stored here -- and through
+    // them every user closure -- be `Send` without also being `Sync`.
+    pub update: Mutex<Box<dyn FnMut() + Send>>,
     pub update_dependencies: RwLock<Vec<Dep>>,
     pub dependencies: RwLock<Vec<Box<dyn IsNode + Send + Sync>>>,
     pub dependents: RwLock<Vec<Box<dyn IsWeakNode + Send + Sync>>>,
     pub keep_alive: RwLock<Vec<GcNode>>,
-    pub cleanups: RwLock<Vec<Box<dyn FnMut() + Send + Sync>>>,
+    pub cleanups: Mutex<Vec<Box<dyn FnMut() + Send>>>,
     pub sodium_ctx: SodiumCtx,
 }
 
@@ -195,7 +200,7 @@ impl Node {
     ///
     /// Add a new Node to the Sodium graph, with the given name,
     /// update fn and Node dependencies.
-    pub fn new<UPDATE: FnMut() + Send + Sync + 'static>(
+    pub fn new<UPDATE: FnMut() + Send + 'static>(
         sodium_ctx: &SodiumCtx,
         name: NodeName,
         update: UPDATE,
@@ -239,12 +244,12 @@ impl Node {
                     update_dependencies.clear();
                 }
                 {
-                    let mut update = node_data.update.write();
+                    let mut update = node_data.update.lock();
                     *update = Box::new(|| {});
                 }
                 let mut cleanups = Vec::new();
                 {
-                    let mut cleanups2 = node_data.cleanups.write();
+                    let mut cleanups2 = node_data.cleanups.lock();
                     std::mem::swap(&mut *cleanups2, &mut cleanups);
                 }
                 for dependency in dependencies {
@@ -313,12 +318,12 @@ impl Node {
             data: Arc::new(NodeData {
                 visited: AtomicBool::new(false),
                 changed: AtomicBool::new(false),
-                update: RwLock::new(Box::new(update)),
+                update: Mutex::new(Box::new(update)),
                 update_dependencies: RwLock::new(Vec::new()),
                 dependencies: RwLock::new(box_clone_vec_is_node(&dependencies)),
                 dependents: RwLock::new(Vec::new()),
                 keep_alive: RwLock::new(Vec::new()),
-                cleanups: RwLock::new(Vec::new()),
+                cleanups: Mutex::new(Vec::new()),
                 sodium_ctx: sodium_ctx.clone(),
             }),
             gc_node: GcNode::new(&sodium_ctx.gc_ctx(), name, deconstructor, trace),

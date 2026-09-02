@@ -16,11 +16,11 @@ impl<A, K> Router<A, K> {
     pub fn new(
         sodium_ctx: &SodiumCtx,
         in_stream: &Stream<A>,
-        selector: impl Fn(&A) -> Vec<K> + Send + Sync + 'static,
+        selector: impl Fn(&A) -> Vec<K> + Send + 'static,
     ) -> Router<A, K>
     where
         A: Clone + Send + 'static,
-        K: Send + Sync + Eq + Hash + 'static,
+        K: Send + Eq + Hash + 'static,
     {
         Router {
             impl_: RouterImpl::new(&sodium_ctx.impl_, &in_stream.impl_, selector),
@@ -32,7 +32,7 @@ impl<A, K> Router<A, K> {
     pub fn filter_matches(&self, k: &K) -> Stream<A>
     where
         A: Clone + Send + 'static,
-        K: Clone + Send + Sync + Eq + Hash + 'static,
+        K: Clone + Send + Eq + Hash + 'static,
     {
         Stream {
             impl_: self.impl_.filter_matches(k),

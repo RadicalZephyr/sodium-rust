@@ -20,7 +20,7 @@ pub enum LazyData<A> {
     Value(A),
 }
 
-impl<A: Send + Clone + 'static> Lazy<A> {
+impl<A: Send + 'static> Lazy<A> {
     /// Create a new `Lazy` whose value will be computed with the
     /// given function sometime after the end of the current
     /// transaction.
@@ -39,7 +39,10 @@ impl<A: Send + Clone + 'static> Lazy<A> {
 
     /// Retrieve the value of this `Lazy` either by running the
     /// supplied function or returning the already computed value.
-    pub fn run(&self) -> A {
+    pub fn run(&self) -> A
+    where
+        A: Clone,
+    {
         let mut data = self.data.lock();
         let next_op: Option<LazyData<A>>;
         let result: A;
