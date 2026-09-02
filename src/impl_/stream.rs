@@ -122,10 +122,8 @@ pub struct StreamData<A> {
     pub coalescer_op: Option<CoalescerBoxFn<A>>,
 }
 
-impl<
-        A: Clone + Send + Sync + 'static,
-        COLLECTION: IntoIterator<Item = A> + Clone + Send + 'static,
-    > Stream<COLLECTION>
+impl<A: Send + 'static, COLLECTION: IntoIterator<Item = A> + Clone + Send + 'static>
+    Stream<COLLECTION>
 {
     pub fn split(&self) -> Stream<A> {
         let sodium_ctx = self.sodium_ctx();
@@ -139,7 +137,14 @@ impl<
                 let iter = collection.clone().into_iter();
                 for a in iter {
                     let ss = ss.clone();
-                    sodium_ctx.post(move || ss.send(a.clone()))
+                    // `post` takes an `FnMut`, so the item is handed over
+                    // through an `Option` rather than cloned.
+                    let mut a = Some(a);
+                    sodium_ctx.post(move || {
+                        if let Some(a) = a.take() {
+                            ss.send(a)
+                        }
+                    })
                 }
             });
             s.add_keep_alive(&listener.gc_node);
@@ -230,7 +235,7 @@ impl<A: Send + 'static> Stream<A> {
                 let sodium_ctx2 = sodium_ctx.clone();
                 sodium_ctx.pre_eot(move || {
                     {
-                        let mut update = node.data.update.write();
+                        let mut update = node.data.update.lock();
                         let update: &mut Box<_> = &mut update;
                         update();
                     }
@@ -255,7 +260,7 @@ impl<A: Send + 'static> Stream<A> {
     pub fn snapshot<
         B: Send + Clone + 'static,
         C: Send + 'static,
-        FN: IsLambda2<A, B, C> + Send + Sync + 'static,
+        FN: IsLambda2<A, B, C> + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -271,7 +276,7 @@ impl<A: Send + 'static> Stream<A> {
         self.snapshot(cb, |_a: &A, b: &B| b.clone())
     }
 
-    pub fn map<B: Send + 'static, FN: IsLambda1<A, B> + Send + Sync + 'static>(
+    pub fn map<B: Send + 'static, FN: IsLambda1<A, B> + Send + 'static>(
         &self,
         mut f: FN,
     ) -> Stream<B> {
@@ -297,10 +302,7 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn filter<PRED: IsLambda1<A, bool> + Send + Sync + 'static>(
-        &self,
-        mut pred: PRED,
-    ) -> Stream<A>
+    pub fn filter<PRED: IsLambda1<A, bool> + Send + 'static>(&self, mut pred: PRED) -> Stream<A>
     where
         A: Clone,
     {
@@ -327,13 +329,12 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn filter_map<B, FN: IsLambda1<A, Option<B>> + Send + Sync + 'static>(
+    pub fn filter_map<B, FN: IsLambda1<A, Option<B>> + Send + 'static>(
         &self,
         mut f: FN,
     ) -> Stream<B>
     where
-        A: Clone,
-        B: Clone + Send + 'static,
+        B: Send + 'static,
     {
         let self_ = self.clone();
         let sodium_ctx = self.sodium_ctx();
@@ -346,7 +347,7 @@ impl<A: Send + 'static> Stream<A> {
                     self_.with_firing_op(|firing_op: &mut Option<A>| {
                         let firing_op2 = firing_op.as_ref().and_then(|firing| f.call(firing));
                         if let Some(firing) = firing_op2 {
-                            s.unwrap()._send(firing.clone());
+                            s.unwrap()._send(firing);
                         }
                     });
                 },
@@ -365,7 +366,7 @@ impl<A: Send + 'static> Stream<A> {
         self.merge(s2, |lhs: &A, _rhs: &A| lhs.clone())
     }
 
-    pub fn merge<FN: IsLambda2<A, A, A> + Send + Sync + 'static>(
+    pub fn merge<FN: IsLambda2<A, A, A> + Send + 'static>(
         &self,
         s2: &Stream<A>,
         mut f: FN,
@@ -426,7 +427,7 @@ impl<A: Send + 'static> Stream<A> {
     where
         B: Send + Clone + 'static,
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, (B, S)> + Send + Sync + 'static,
+        F: IsLambda2<A, S, (B, S)> + Send + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         sodium_ctx.transaction(|| {
@@ -444,7 +445,7 @@ impl<A: Send + 'static> Stream<A> {
     pub fn accum_lazy<S, F>(&self, init_state: Lazy<S>, f: F) -> Cell<S>
     where
         S: Send + Clone + 'static,
-        F: IsLambda2<A, S, S> + Send + Sync + 'static,
+        F: IsLambda2<A, S, S> + Send + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         let sodium_ctx = &sodium_ctx;
@@ -515,11 +516,7 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn _listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(
-        &self,
-        mut k: K,
-        weak: bool,
-    ) -> Listener {
+    pub fn _listen<K: IsLambda1<A, ()> + Send + 'static>(&self, mut k: K, weak: bool) -> Listener {
         self.sodium_ctx().transaction(|| {
             let self_ = self.clone();
             let f_deps = lambda1_deps(&k);
@@ -541,11 +538,11 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: IsLambda1<A, ()> + Send + 'static>(&self, k: K) -> Listener {
         self._listen(k, true)
     }
 
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: IsLambda1<A, ()> + Send + 'static>(&self, k: K) -> Listener {
         self._listen(k, false)
     }
 
@@ -589,8 +586,8 @@ impl<A: Send + 'static> Stream<A> {
     }
 }
 
-impl<A: Clone + Send + 'static> Stream<A> {
-    pub fn split_filter<PRED: IsLambda1<A, bool> + Send + Sync + 'static>(
+impl<A: Send + 'static> Stream<A> {
+    pub fn split_filter<PRED: IsLambda1<A, bool> + Send + 'static>(
         &self,
         mut pred: PRED,
     ) -> (Stream<A>, Stream<A>)
@@ -645,9 +642,9 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
     where
-        B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+        B: Send + 'static,
+        C: Send + 'static,
+        FN: Fn(&A) -> Enum2<B, C> + Send + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         let sodium_ctx2 = sodium_ctx.clone();
@@ -700,10 +697,10 @@ impl<A: Clone + Send + 'static> Stream<A> {
 
     pub fn split_enum3<B, C, D, FN>(&self, f: FN) -> (Stream<B>, Stream<C>, Stream<D>)
     where
-        B: Clone + Send + 'static,
-        C: Clone + Send + 'static,
-        D: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
+        B: Send + 'static,
+        C: Send + 'static,
+        D: Send + 'static,
+        FN: Fn(&A) -> Enum3<B, C, D> + Send + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         let sodium_ctx2 = sodium_ctx.clone();

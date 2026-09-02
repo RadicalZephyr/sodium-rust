@@ -335,7 +335,7 @@ impl SodiumCtx {
                 });
         // if dependencies changed, then execute update on current node
         if any_changed {
-            let mut update = node.data.update.write();
+            let mut update = node.data.update.lock();
             let update: &mut Box<_> = &mut *update;
             update();
         }

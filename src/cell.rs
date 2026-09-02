@@ -12,6 +12,16 @@ use crate::Dep;
 /// also called a _behavior_, _property_, or a _signal_. A `Cell`
 /// should be used for modeling any pieces of mutable state in an FRP
 /// application.
+///
+/// # Type requirements
+///
+/// A cell's value must be `Clone + Send + 'static`. It needs `Send +
+/// 'static` for the same reason a [`Stream`]'s value does: the graph
+/// is shared across threads and outlives any one scope. It needs
+/// `Clone` because a cell is read from many places, every
+/// [`sample`][Cell::sample] and every [`Stream::snapshot`], and each
+/// reader gets its own copy. To hold a type that is not `Clone`, or is
+/// expensive to copy, hold an [`Arc`][std::sync::Arc] of it instead.
 pub struct Cell<A> {
     pub impl_: CellImpl<A>,
 }
@@ -103,7 +113,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// The returned `Cell` always reflects the value produced by the
     /// function applied to the input `Cell`s value. The given
     /// function _must_ be referentially transparent.
-    pub fn map<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+    pub fn map<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + 'static>(
         &self,
         f: FN,
     ) -> Cell<B> {
@@ -122,7 +132,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// This is a low-level escape hatch. Prefer expressing the
     /// dependency in the network itself, with [`lift2`][Cell::lift2] and
     /// friends, which do this bookkeeping for you.
-    pub fn map_with_deps<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+    pub fn map_with_deps<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + 'static>(
         &self,
         f: FN,
         deps: Vec<Dep>,
@@ -376,7 +386,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
 
     /// A variant of [`listen`][Cell::listen] that will deregister the
     /// listener automatically if the listener is garbage-collected.
-    pub fn listen_weak<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: FnMut(&A) + Send + 'static>(&self, k: K) -> Listener {
         self.listen_weak_with_deps(k, Vec::new())
     }
 
@@ -385,7 +395,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// See [`map_with_deps`][Cell::map_with_deps] for when this is
     /// needed.
-    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+    pub fn listen_weak_with_deps<K: FnMut(&A) + Send + 'static>(
         &self,
         k: K,
         deps: Vec<Dep>,
@@ -403,7 +413,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// This is an operational mechanism for interfacing between the
     /// world of I/O and FRP.
-    pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: FnMut(&A) + Send + 'static>(&self, k: K) -> Listener {
         self.listen_with_deps(k, Vec::new())
     }
 
@@ -412,7 +422,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// See [`map_with_deps`][Cell::map_with_deps] for when this is
     /// needed.
-    pub fn listen_with_deps<K: FnMut(&A) + Send + Sync + 'static>(
+    pub fn listen_with_deps<K: FnMut(&A) + Send + 'static>(
         &self,
         k: K,
         deps: Vec<Dep>,

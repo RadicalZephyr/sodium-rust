@@ -36,7 +36,7 @@ impl SodiumCtx {
     }
 
     /// Create a new stream that will never fire in this context.
-    pub fn new_stream<A: Clone + Send + 'static>(&self) -> Stream<A> {
+    pub fn new_stream<A: Send + 'static>(&self) -> Stream<A> {
         Stream::new(self)
     }
 
@@ -46,7 +46,7 @@ impl SodiumCtx {
     }
 
     /// Create a new [`StreamSink`] for interfacing I/O and FRP.
-    pub fn new_stream_sink<A: Clone + Send + 'static>(&self) -> StreamSink<A> {
+    pub fn new_stream_sink<A: Send + 'static>(&self) -> StreamSink<A> {
         StreamSink::new(self)
     }
 
@@ -66,7 +66,7 @@ impl SodiumCtx {
     /// allows [`send`][CellSink::send]ing multiple event values per
     /// transaction.
     pub fn new_stream_sink_with_coalescer<
-        A: Clone + Send + 'static,
+        A: Send + 'static,
         COALESCER: FnMut(&A, &A) -> A + Send + 'static,
     >(
         &self,
@@ -100,11 +100,11 @@ impl SodiumCtx {
     pub fn new_router<A, K>(
         &self,
         in_stream: &Stream<A>,
-        selector: impl Fn(&A) -> Vec<K> + Send + Sync + 'static,
+        selector: impl Fn(&A) -> Vec<K> + Send + 'static,
     ) -> Router<A, K>
     where
         A: Clone + Send + 'static,
-        K: Send + Sync + Eq + Hash + 'static,
+        K: Send + Eq + Hash + 'static,
     {
         Router::new(self, in_stream, selector)
     }
