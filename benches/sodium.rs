@@ -1,3 +1,10 @@
+// The benches are dev-only and cannot be built on the MSRV regardless: the
+// criterion dependency tree reaches edition-2024 manifests that 1.71's cargo
+// cannot parse. rust-version governs what consumers of the published crate
+// need, so let this target use newer APIs -- `u16::is_multiple_of` here, which
+// clippy itself suggested. The lint still applies to src/.
+#![allow(clippy::incompatible_msrv)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use sodium_rust::SodiumCtx;
