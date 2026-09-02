@@ -30,7 +30,7 @@ sodium = "0.1"
 ## Example
 
 ```rust
-use sodium::SodiumCtx;
+use sodium_rust::SodiumCtx;
 
 fn main() {
     let ctx = SodiumCtx::new();

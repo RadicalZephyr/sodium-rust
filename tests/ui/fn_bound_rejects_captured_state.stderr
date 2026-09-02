@@ -1,0 +1,46 @@
+error[E0594]: cannot assign to `n`, as it is a captured variable in a `Fn` closure
+  --> tests/ui/fn_bound_rejects_captured_state.rs:31:9
+   |
+23 |       pub fn map<B, F: Fn(&A) -> B + Send + Sync + 'static>(&self, _f: F) {}
+   |                                                                        - change this to accept `FnMut` instead of `Fn`
+...
+30 |       s.map(move |_a| {
+   |         -   --------- in this closure
+   |  _______|
+   | |
+31 | |         n += 1;
+   | |         ^^^^^^ cannot assign
+32 | |         n
+33 | |     });
+   | |______- expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/fn_bound_rejects_captured_state.rs:29:9
+   |
+29 |     let mut n = 0;
+   |         ----^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0596]: cannot borrow `rng` as mutable, as it is a captured variable in a `Fn` closure
+  --> tests/ui/fn_bound_rejects_captured_state.rs:53:26
+   |
+23 |     pub fn map<B, F: Fn(&A) -> B + Send + Sync + 'static>(&self, _f: F) {}
+   |                                                                      - change this to accept `FnMut` instead of `Fn`
+...
+53 |     s.map(move |a| *a + (rng.next() % 10) as i32);
+   |       -------------------^^^---------------------
+   |       |   |              |
+   |       |   |              cannot borrow as mutable
+   |       |   in this closure
+   |       expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/fn_bound_rejects_captured_state.rs:52:9
+   |
+52 |     let mut rng = Lcg(1);
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
