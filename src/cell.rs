@@ -403,6 +403,9 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// This is an operational mechanism for interfacing between the
     /// world of I/O and FRP.
+    ///
+    /// Unlike the combinators, which take `Fn`, the handler is `FnMut`: this is
+    /// where effects belong, so it may accumulate into something it captured.
     pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         self.listen_with_deps(k, Vec::new())
     }
