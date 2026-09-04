@@ -18,7 +18,7 @@ log = "0.4.8"
 parking_lot = "0.12.1"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.8"
 env_logger = "0.9.0"
 # `rustversion` gates the trybuild `compile_fail` cases to stable: their
 # expected stderr is rustc-version sensitive, and CI also runs beta and nightly.

@@ -10,9 +10,9 @@ all-features = true
 
 [advisories]
 ignore = [
-    # `atty` is unmaintained. It reaches us only through the dev-dependencies
-    # criterion 0.4 and env_logger 0.9; bumping those to criterion 0.8 and
-    # env_logger 0.11 drops it from the graph entirely, at which point this
+    # `atty` is unmaintained. Criterion no longer drags it in as of the 0.8
+    # bump, so the dev-dependency env_logger 0.9 is now its only path into the
+    # graph; moving to env_logger 0.11 drops it entirely, at which point this
     # entry should be deleted.
     "RUSTSEC-2024-0375",
 ]
