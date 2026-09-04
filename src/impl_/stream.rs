@@ -230,8 +230,7 @@ impl<A: Send + 'static> Stream<A> {
                 let sodium_ctx2 = sodium_ctx.clone();
                 sodium_ctx.pre_eot(move || {
                     {
-                        let mut update = node.data.update.write();
-                        let update: &mut Box<_> = &mut update;
+                        let update = node.data.update.read();
                         update();
                     }
                     let is_firing =

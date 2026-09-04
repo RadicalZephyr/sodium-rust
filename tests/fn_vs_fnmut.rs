@@ -547,6 +547,39 @@ fn claim_shared_collection_is_o1_but_values_drift() {
 // anyone relying on the count.
 // ---------------------------------------------------------------------------
 
+/// A node with two dependents fires its update once per transaction, not once
+/// per dependent.
+///
+/// The specific guard here is on the lock: a node's update is `dyn Fn` and is
+/// fired under a *shared* lock, so nothing about being reachable twice forces
+/// -- or prevents -- a second evaluation. If the diamond ever started
+/// double-firing, a combinator closure counting its own calls would silently
+/// disagree with the event count.
+#[test]
+fn state_fires_once_for_a_node_with_two_dependents() {
+    let ctx = SodiumCtx::new();
+    let sink = ctx.new_stream_sink::<i32>();
+
+    let calls = Arc::new(Mutex::new(0usize));
+    let c = calls.clone();
+    let shared = sink.stream().map(move |a| {
+        *c.lock().unwrap() += 1;
+        *a
+    });
+
+    let (left, l1) = drain(&shared.map(|a| *a + 1));
+    let (right, l2) = drain(&shared.map(|a| *a + 100));
+
+    sink.send(1);
+    sink.send(2);
+
+    assert_eq!(*calls.lock().unwrap(), 2, "two events, two evaluations");
+    assert_eq!(*left.lock().unwrap(), vec![2, 3]);
+    assert_eq!(*right.lock().unwrap(), vec![101, 102]);
+    l1.unlisten();
+    l2.unlisten();
+}
+
 /// Invocations track events one-for-one, and adding a listener does not re-run
 /// an upstream closure. Note the second assertion: a combinator closure runs
 /// whether or not anything is listening.

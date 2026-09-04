@@ -185,8 +185,7 @@ impl<A: Send + 'static> Cell<A> {
             {
                 let c = c.clone();
                 sodium_ctx.pre_eot(move || {
-                    let mut update = node.data.update.write();
-                    let update: &mut Box<_> = &mut *update;
+                    let update = node.data.update.read();
                     update();
                     // c captured, but not used so that update() will not crash here
                     c.nop();
