@@ -1,7 +1,7 @@
 use crate::cell::Cell;
 use crate::impl_::dep::Dep;
 use crate::impl_::enum_::{Enum2, Enum3};
-use crate::impl_::lambda::{lambda1, lambda2};
+use crate::impl_::lambda::{fnmut_as_fn, lambda1, lambda2};
 use crate::impl_::stream::Stream as StreamImpl;
 use crate::listener::Listener;
 use crate::sodium_ctx::SodiumCtx;
@@ -742,7 +742,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         deps: Vec<Dep>,
     ) -> Listener {
         Listener {
-            impl_: self.impl_.listen_weak(lambda1(k, deps)),
+            impl_: self.impl_.listen_weak(lambda1(fnmut_as_fn(k), deps)),
         }
     }
 
@@ -773,7 +773,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         deps: Vec<Dep>,
     ) -> Listener {
         Listener {
-            impl_: self.impl_.listen(lambda1(k, deps)),
+            impl_: self.impl_.listen(lambda1(fnmut_as_fn(k), deps)),
         }
     }
 }
