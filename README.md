@@ -30,7 +30,7 @@ sodium = "0.1"
 ## Example
 
 ```rust
-use sodium::SodiumCtx;
+use sodium_rust::SodiumCtx;
 
 fn main() {
     let ctx = SodiumCtx::new();
@@ -92,6 +92,42 @@ closure does not hold a reference to corrupts the collector's bookkeeping.
 Prefer expressing the dependency in the network itself where you can --
 `snapshot`, `lift2` and friends do this bookkeeping for you -- and reach for
 `*_with_deps` only when the closure genuinely has to reach outside the graph.
+
+### Combinators Take `Fn`; Listeners Take `FnMut`
+
+A combinator is supposed to be a function of its arguments, so the combinators
+are bounded on `Fn`. A closure that mutates something it captured is `FnMut`,
+and will not compile:
+
+```rust
+let mut n = 0;
+stream.map(move |_a| { n += 1; n })  // error[E0594]: cannot assign to `n`
+```
+
+Usually that state is part of the dataflow, and belongs in the graph rather
+than hidden inside a closure. `accum` and `collect` take the state as an
+argument and hand back the next one:
+
+```rust
+let counter = stream.collect(0, |_a, n| (*n + 1, *n + 1));
+```
+
+This is worth doing for its own sake: `accum` gives you a `Cell` you can
+`sample`, compose and pass to other combinators, where a captured `mut` is
+visible to nobody. For state that genuinely is not part of the dataflow -- a
+cache, say -- use `Arc<Mutex<_>>`, which a `Fn` closure is free to hold.
+
+Listeners are the exception. `listen` and `listen_weak` take `FnMut`, because
+they are the effectful edge of the graph and their handlers are there to
+perform effects:
+
+```rust
+let mut seen = Vec::new();
+let l = stream.listen(move |a| seen.push(*a));  // fine
+```
+
+The handler's mutability is confined to the handler; the graph below it stays
+`Fn`, which is what lets a node be fired without exclusive access to it.
 
 ## Repository layout
 

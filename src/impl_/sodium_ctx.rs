@@ -335,8 +335,12 @@ impl SodiumCtx {
                 });
         // if dependencies changed, then execute update on current node
         if any_changed {
-            let mut update = node.data.update.write();
-            let update: &mut Box<_> = &mut *update;
+            // A shared lock: the update is `dyn Fn`, so firing a node does not
+            // require exclusive access to it. Only replacing one does, which
+            // `StreamLoop::loop_` and node deconstruction do under `write`.
+            // This is what lets independent nodes be fired concurrently once
+            // there is an evaluator that wants to.
+            let update = node.data.update.read();
             update();
         }
         // if self changed then update dependents
