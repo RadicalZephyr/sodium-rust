@@ -758,6 +758,9 @@ impl<A: Clone + Send + 'static> Stream<A> {
     /// handler should not block. It also is not allowed to use
     /// [`CellSink::send`][crate::CellSink::send] or
     /// [`StreamSink::send`][crate::StreamSink::send] in the handler.
+    ///
+    /// Unlike the combinators, which take `Fn`, the handler is `FnMut`: this is
+    /// where effects belong, so it may accumulate into something it captured.
     pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         self.listen_with_deps(k, Vec::new())
     }
