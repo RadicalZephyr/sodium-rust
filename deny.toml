@@ -9,13 +9,9 @@
 all-features = true
 
 [advisories]
-ignore = [
-    # `atty` is unmaintained. Criterion no longer drags it in as of the 0.8
-    # bump, so the dev-dependency env_logger 0.9 is now its only path into the
-    # graph; moving to env_logger 0.11 drops it entirely, at which point this
-    # entry should be deleted.
-    "RUSTSEC-2024-0375",
-]
+# Nothing is ignored right now. The last entry was the unmaintained `atty`
+# (RUSTSEC-2024-0375), which left the graph when env_logger went to 0.11.
+ignore = []
 
 [licenses]
 # sodium-rust is BSD-3-Clause; everything we pull in must be compatible with
