@@ -1,0 +1,129 @@
+error[E0594]: cannot assign to `n`, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:30:9
+   |
+29 |       s.map(move |_a| {
+   |         -   --------- in this closure
+   |  _______|
+   | |
+30 | |         n += 1;
+   | |         ^^^^^^ cannot assign
+31 | |         n
+32 | |     })
+   | |______- expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/combinator_rejects_captured_state.rs:28:9
+   |
+28 |     let mut n = 0;
+   |         ----^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+error[E0596]: cannot borrow `buf` as mutable, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:40:9
+   |
+39 |       s.map(move |a| {
+   |         -   -------- in this closure
+   |  _______|
+   | |
+40 | |         buf.push(*a);
+   | |         ^^^ cannot borrow as mutable
+41 | |         if buf.len() > 3 {
+42 | |             buf.remove(0);
+43 | |         }
+44 | |         buf.clone()
+45 | |     })
+   | |______- expects `Fn` instead of `FnMut`
+
+error[E0596]: cannot borrow `buf` as mutable, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:42:13
+   |
+39 |       s.map(move |a| {
+   |         -   -------- in this closure
+   |  _______|
+   | |
+40 | |         buf.push(*a);
+41 | |         if buf.len() > 3 {
+42 | |             buf.remove(0);
+   | |             ^^^ cannot borrow as mutable
+43 | |         }
+44 | |         buf.clone()
+45 | |     })
+   | |______- expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/combinator_rejects_captured_state.rs:38:9
+   |
+38 |     let mut buf: Vec<i32> = Vec::new();
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
+
+error[E0594]: cannot assign to `prev`, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:53:9
+   |
+51 |       s.map(move |a| {
+   |         -   -------- in this closure
+   |  _______|
+   | |
+52 | |         let is_new = prev != Some(*a);
+53 | |         prev = Some(*a);
+   | |         ^^^^^^^^^^^^^^^ cannot assign
+54 | |         is_new
+55 | |     })
+   | |______- expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/combinator_rejects_captured_state.rs:50:9
+   |
+50 |     let mut prev: Option<i32> = None;
+   |         ----^^^^
+   |         |
+   |         help: remove this `mut`
+
+warning: value assigned to `prev` is never read
+  --> tests/ui/combinator_rejects_captured_state.rs:53:9
+   |
+53 |         prev = Some(*a);
+   |         ^^^^^^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+error[E0596]: cannot borrow `rng` as mutable, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:73:26
+   |
+73 |     s.map(move |a| *a + (rng.next() % 10) as i32)
+   |       -------------------^^^---------------------
+   |       |   |              |
+   |       |   |              cannot borrow as mutable
+   |       |   in this closure
+   |       expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/combinator_rejects_captured_state.rs:72:9
+   |
+72 |     let mut rng = Lcg(1);
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
+
+error[E0596]: cannot borrow `cache` as mutable, as it is a captured variable in a `Fn` closure
+  --> tests/ui/combinator_rejects_captured_state.rs:82:21
+   |
+82 |     s.map(move |a| *cache.entry(*a).or_insert_with(|| *a * *a))
+   |       --------------^^^^^--------------------------------------
+   |       |   |         |
+   |       |   |         cannot borrow as mutable
+   |       |   in this closure
+   |       expects `Fn` instead of `FnMut`
+
+warning: variable does not need to be mutable
+  --> tests/ui/combinator_rejects_captured_state.rs:81:9
+   |
+81 |     let mut cache: HashMap<i32, i32> = HashMap::new();
+   |         ----^^^^^
+   |         |
+   |         help: remove this `mut`
