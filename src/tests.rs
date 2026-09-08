@@ -6,6 +6,7 @@ use std::{
 };
 
 mod common_test;
+mod loop_test;
 mod mem_test;
 mod node_test;
 
@@ -83,8 +84,6 @@ fn map() {
     }
     assert_memory_freed(sodium_ctx);
 }
-
-// TODO: missing map_optional
 
 #[test]
 fn merge_non_simultaneous() {
