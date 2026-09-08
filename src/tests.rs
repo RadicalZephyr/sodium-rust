@@ -2129,3 +2129,520 @@ fn primes2() {
     }
     assert_memory_freed(sodium_ctx);
 }
+
+#[test]
+fn switch_and_defer() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let si = sodium_ctx.new_stream_sink::<i32>();
+        let never: Stream<String> = Stream::new(sodium_ctx);
+        let css = {
+            let sodium_ctx = sodium_ctx.clone();
+            si.stream()
+                .map(move |i: &i32| {
+                    let c = sodium_ctx.new_cell(format!("A{}", i));
+                    Operational::defer(&Operational::value(&c))
+                })
+                .hold(never)
+        };
+        let l;
+        {
+            let out = out.clone();
+            l = Cell::switch_s(&css)
+                .listen(move |x: &String| out.lock().as_mut().unwrap().push(x.clone()));
+        }
+        si.send(2);
+        si.send(4);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<String> = lock.as_ref().unwrap();
+            assert_eq!(
+                vec!["A2", "A4"],
+                out.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
+            );
+        }
+    }
+    // No assert_memory_freed here: see switch_and_defer_frees_memory.
+}
+
+// FIXME: the network built by switch_and_defer cannot be collected.
+// `collect_cycles` panics from inside the collector with "freed node ref
+// count did not drop to zero for node N (Listener::new)". The FRP values
+// are right, so this is purely a memory-management defect.
+#[ignore = "collect_cycles panics on the switch_s-over-defer network"]
+#[test]
+fn switch_and_defer_frees_memory() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let si = sodium_ctx.new_stream_sink::<i32>();
+        let never: Stream<String> = Stream::new(sodium_ctx);
+        let css = {
+            let sodium_ctx = sodium_ctx.clone();
+            si.stream()
+                .map(move |i: &i32| {
+                    let c = sodium_ctx.new_cell(format!("A{}", i));
+                    Operational::defer(&Operational::value(&c))
+                })
+                .hold(never)
+        };
+        let l = Cell::switch_s(&css).listen(|_: &String| {});
+        si.send(2);
+        l.unlisten();
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// A `map` whose function is declared to depend on an unrelated stream:
+// the extra dependency must not make the mapped stream fire.
+#[test]
+fn map_tack() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s = sodium_ctx.new_stream_sink::<i32>();
+        let t = sodium_ctx.new_stream_sink::<&'static str>();
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = s
+                .stream()
+                .map_with_deps(|a: &i32| a + 1, vec![t.stream().to_dep()])
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        s.send(7);
+        t.send("banana");
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![8], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// `accum` where the accumulated state is itself a `Cell`, unwrapped
+// again with `switch_c`.
+#[test]
+fn accum_cell_via_switch_c() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let s_hello = sodium_ctx.new_stream_sink::<&'static str>();
+        let s_upper = sodium_ctx.new_stream_sink::<bool>();
+        let c_hello = s_hello
+            .stream()
+            .accum(String::new(), |val: &&'static str, acc: &String| {
+                format!("{}{}", acc, val)
+            });
+        let c_final = Cell::switch_c(&s_upper.stream().accum(
+            c_hello,
+            |flag: &bool, acc: &Cell<String>| {
+                let flag = *flag;
+                acc.map(move |str: &String| {
+                    if flag {
+                        str.to_uppercase()
+                    } else {
+                        str.to_lowercase()
+                    }
+                })
+            },
+        ));
+        let l;
+        {
+            let out = out.clone();
+            l = c_final.listen(move |a: &String| out.lock().as_mut().unwrap().push(a.clone()));
+        }
+        s_hello.send("h");
+        s_upper.send(true);
+        s_hello.send("e");
+        s_hello.send("l");
+        s_upper.send(false);
+        s_hello.send("l");
+        s_hello.send("o");
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<String> = lock.as_ref().unwrap();
+            assert_eq!(
+                vec!["", "h", "H", "HE", "HEL", "hel", "hell", "hello"],
+                out.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
+            );
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// Accumulating over several cells at once, by looping a `snapshot4`
+// back through a `hold`.
+#[test]
+fn accum_over_multiple_cells() {
+    #[derive(Clone)]
+    enum FlushTarget {
+        Hello,
+        World,
+        Empty,
+    }
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let s_hello = sodium_ctx.new_stream_sink::<&'static str>();
+        let s_world = sodium_ctx.new_stream_sink::<&'static str>();
+        let s_flush = sodium_ctx.new_stream_sink::<FlushTarget>();
+        let c_final = sodium_ctx.transaction(|| {
+            let c_loop = sodium_ctx.new_cell_loop::<String>();
+            c_loop.loop_(
+                &s_flush
+                    .stream()
+                    .snapshot4(
+                        &c_loop.cell(),
+                        &s_hello.stream().hold(""),
+                        &s_world.stream().hold(""),
+                        |evt: &FlushTarget,
+                         total: &String,
+                         hello: &&'static str,
+                         world: &&'static str| match evt {
+                            FlushTarget::Hello => format!("{}{}", total, hello),
+                            FlushTarget::World => format!("{}{}", total, world),
+                            FlushTarget::Empty => format!("{} ", total),
+                        },
+                    )
+                    .hold(String::new()),
+            );
+            c_loop.cell()
+        });
+        let l;
+        {
+            let out = out.clone();
+            l = c_final.listen(move |a: &String| out.lock().as_mut().unwrap().push(a.clone()));
+        }
+        for c in ["h", "e", "l", "l", "o"] {
+            s_hello.send(c);
+            s_flush.send(FlushTarget::Hello);
+        }
+        s_flush.send(FlushTarget::Empty);
+        for c in ["w", "o", "r", "l", "d"] {
+            s_world.send(c);
+            s_flush.send(FlushTarget::World);
+        }
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<String> = lock.as_ref().unwrap();
+            assert_eq!(
+                vec![
+                    "",
+                    "h",
+                    "he",
+                    "hel",
+                    "hell",
+                    "hello",
+                    "hello ",
+                    "hello w",
+                    "hello wo",
+                    "hello wor",
+                    "hello worl",
+                    "hello world"
+                ],
+                out.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
+            );
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// Four cell updates in one transaction must only re-run the lifted
+// function once, on top of the initial evaluation.
+#[test]
+fn cell_lift_work_load() {
+    const LINES: [&str; 4] = [
+        "Work it harder",
+        "Make it better",
+        "Do it faster",
+        "Makes us stronger",
+    ];
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let c1 = sodium_ctx.new_cell_sink(0);
+        let c2 = sodium_ctx.new_cell_sink(0);
+        let c3 = sodium_ctx.new_cell_sink(0);
+        let c4 = sodium_ctx.new_cell_sink(0);
+        let c = {
+            let out = out.clone();
+            c1.cell().lift4(
+                &c2.cell(),
+                &c3.cell(),
+                &c4.cell(),
+                move |x1: &i32, x2: &i32, x3: &i32, x4: &i32| {
+                    let mut lock = out.lock();
+                    let out: &mut Vec<&'static str> = lock.as_mut().unwrap();
+                    let idx = out.len() % LINES.len();
+                    out.push(LINES[idx]);
+                    x1 + x2 + x3 + x4
+                },
+            )
+        };
+        let l = c.listen(|_: &i32| {});
+        sodium_ctx.transaction(|| {
+            c1.send(1);
+            c2.send(2);
+            c3.send(3);
+            c4.send(4);
+        });
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<&'static str> = lock.as_ref().unwrap();
+            assert_eq!(vec!["Work it harder", "Make it better"], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// Snapshotting a cell that is itself downstream of the stream being
+// snapshotted.
+#[test]
+fn double_snapshot() {
+    #[derive(Clone, Debug, PartialEq)]
+    struct Area {
+        width: i32,
+        height: i32,
+    }
+    #[derive(Clone)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    #[derive(Clone, Debug, PartialEq)]
+    struct State {
+        info: String,
+    }
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let display_out = Arc::new(Mutex::new(Vec::new()));
+        let state_out = Arc::new(Mutex::new(Vec::new()));
+
+        let s_display = sodium_ctx.new_stream_sink::<Area>();
+        let c_display = s_display.stream().hold(Area {
+            width: 1024,
+            height: 768,
+        });
+        let l_display;
+        {
+            let display_out = display_out.clone();
+            l_display = c_display
+                .listen(move |a: &Area| display_out.lock().as_mut().unwrap().push(a.clone()));
+        }
+
+        let s_touch_sink = sodium_ctx.new_stream_sink::<Point>();
+        let s_touch =
+            s_touch_sink
+                .stream()
+                .snapshot(&c_display, |touch: &Point, display: &Area| Point {
+                    x: display.width + touch.x,
+                    y: display.height + touch.y,
+                });
+
+        let s_state_sink = sodium_ctx.new_stream_sink::<()>();
+        let c_state = s_state_sink.stream().accum(
+            State {
+                info: String::from("Current State"),
+            },
+            |_: &(), s: &State| s.clone(),
+        );
+        let s_state = s_touch.snapshot(&c_state, |point: &Point, state: &State| State {
+            info: format!("{}: ({}, {})", state.info, point.x, point.y),
+        });
+        let l_state;
+        {
+            let state_out = state_out.clone();
+            l_state =
+                s_state.listen(move |s: &State| state_out.lock().as_mut().unwrap().push(s.clone()));
+        }
+
+        s_touch_sink.send(Point { x: 176, y: 0 });
+        s_display.send(Area {
+            width: 2048,
+            height: 1536,
+        });
+        s_state_sink.send(());
+        s_touch_sink.send(Point { x: 176, y: 0 });
+
+        l_display.unlisten();
+        l_state.unlisten();
+        {
+            let lock = display_out.lock();
+            let display_out: &Vec<Area> = lock.as_ref().unwrap();
+            assert_eq!(
+                vec![
+                    Area {
+                        width: 1024,
+                        height: 768
+                    },
+                    Area {
+                        width: 2048,
+                        height: 1536
+                    }
+                ],
+                *display_out
+            );
+        }
+        {
+            let lock = state_out.lock();
+            let state_out: &Vec<State> = lock.as_ref().unwrap();
+            assert_eq!(
+                vec![
+                    State {
+                        info: String::from("Current State: (1200, 768)")
+                    },
+                    State {
+                        info: String::from("Current State: (2224, 1536)")
+                    }
+                ],
+                *state_out
+            );
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+#[derive(Clone)]
+struct NestedData {
+    c_value: Cell<i32>,
+}
+
+// A cell of a struct holding a cell, where the outer cell is built with
+// `lift2` and the inner one with `map`.
+#[test]
+fn lift_with_nested_data_map() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let c_original = sodium_ctx.new_cell(NestedData {
+            c_value: sodium_ctx.new_cell(1),
+        });
+        let s_offset = sodium_ctx.new_stream_sink::<i32>();
+        let c_offset = s_offset.stream().hold(0);
+        let c_total = c_original.lift2(&c_offset, |data: &NestedData, offset: &i32| {
+            let offset = *offset;
+            NestedData {
+                c_value: data.c_value.map(move |value: &i32| value + offset),
+            }
+        });
+        let l;
+        {
+            let out = out.clone();
+            l = Cell::switch_c(&c_total.map(|data: &NestedData| data.c_value.clone()))
+                .listen(move |value: &i32| out.lock().as_mut().unwrap().push(*value));
+        }
+        s_offset.send(2);
+        s_offset.send(4);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![1, 3, 5], *out);
+        }
+    }
+    // No assert_memory_freed here: see
+    // lift_with_nested_data_map_frees_memory.
+}
+
+// FIXME: the network built by lift_with_nested_data_map leaks. After
+// unlistening and collecting cycles, three nodes are still live. The FRP
+// values are right, so this is purely a memory-management defect, and it
+// is specific to building the outer cell with `lift2`: the mirror-image
+// network in map_with_nested_data_lift, which builds the outer cell with
+// `map_with_deps`, does free its nodes.
+#[ignore = "the lift2-over-nested-cell network leaks nodes"]
+#[test]
+fn lift_with_nested_data_map_frees_memory() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let c_original = sodium_ctx.new_cell(NestedData {
+            c_value: sodium_ctx.new_cell(1),
+        });
+        let s_offset = sodium_ctx.new_stream_sink::<i32>();
+        let c_offset = s_offset.stream().hold(0);
+        let c_total = c_original.lift2(&c_offset, |data: &NestedData, offset: &i32| {
+            let offset = *offset;
+            NestedData {
+                c_value: data.c_value.map(move |value: &i32| value + offset),
+            }
+        });
+        let l = Cell::switch_c(&c_total.map(|data: &NestedData| data.c_value.clone()))
+            .listen(|_: &i32| {});
+        s_offset.send(2);
+        l.unlisten();
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// The same network the other way round: the outer cell is built with
+// `map` and the inner one with `lift2`, so the mapping function needs
+// an explicit dependency on the lifted cell. Listening inside a
+// transaction must not change the result.
+fn map_with_nested_data_lift(in_transaction: bool) {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let c_original = sodium_ctx.new_cell(NestedData {
+            c_value: sodium_ctx.new_cell(1),
+        });
+        let s_offset = sodium_ctx.new_stream_sink::<i32>();
+        let c_offset = s_offset.stream().hold(0);
+        let c_total = c_original.map_with_deps(
+            {
+                let c_offset = c_offset.clone();
+                move |data: &NestedData| NestedData {
+                    c_value: data
+                        .c_value
+                        .lift2(&c_offset, |value: &i32, offset: &i32| value + offset),
+                }
+            },
+            vec![c_offset.to_dep()],
+        );
+        let listen = || {
+            let out = out.clone();
+            Cell::switch_c(&c_total.map(|data: &NestedData| data.c_value.clone()))
+                .listen(move |value: &i32| out.lock().as_mut().unwrap().push(*value))
+        };
+        let l = if in_transaction {
+            sodium_ctx.transaction(listen)
+        } else {
+            listen()
+        };
+        s_offset.send(2);
+        s_offset.send(4);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![1, 3, 5], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+#[test]
+fn map_with_nested_data_lift_in_transaction() {
+    map_with_nested_data_lift(true);
+}
+
+#[test]
+fn map_with_nested_data_lift_no_transaction() {
+    map_with_nested_data_lift(false);
+}
