@@ -4,7 +4,11 @@
 **Date:** 2026-09-08
 
 Implementation is laid out in [the benchmark plan](../benchmark-plan.md), with
-a checklist in [the TODO](../benchmark-todo.md).
+a checklist in [the TODO](../benchmark-todo.md). Every measurement quoted below
+is reproducible: the code that produced it is in [the `research`
+crate](../../research), one binary per question, each recording the output it
+gave. Allocation and instruction counts reproduce exactly; the timings will
+not, and the gap between those two statements is most of the argument here.
 
 ## Context
 
@@ -22,9 +26,9 @@ the whole graph is rebuilt inside every `b.iter()` body:
 
 | maps | whole (µs) | construct only (µs) | construct % |
 |---|---|---|---|
-| 0 | 3080.5 | 4.5 | 0.1% |
-| 1 | 5241.7 | 9.8 | 0.2% |
-| 8 | 20170.4 | 56.7 | 0.3% |
+| 0 | 4647.8 | 6.6 | 0.1% |
+| 1 | 7822.5 | 12.5 | 0.2% |
+| 8 | 29406.9 | 79.9 | 0.3% |
 
 Construction is noise. The benches really are measuring propagation.
 
@@ -36,17 +40,24 @@ Build a one-node subgraph on a live context, release it, and repeat:
 
 | after N release cycles | `node_count` | allocs per send | ns per send |
 |---|---|---|---|
-| 0 | 2 | 27.0 | 3 361 |
-| 300, released with `drop` | 602 | 7 567.5 | 1 110 522 |
-| 300, then `collect_cycles()` | 602 | 7 567.3 | 1 079 582 |
-| 300, released with `unlisten()` | 2 | 327.3 | 36 860 |
-| 300, `unlisten()` then `collect_cycles()` | 2 | 327.0 | 32 092 |
+| 0 | 2 | 27.0 | 4 755 |
+| 100, released with `drop` | 202 | 2 558.3 | 544 267 |
+| 300, released with `drop` | 602 | 7 567.3 | 1 621 685 |
+| 800, released with `drop` | 1602 | 20 073.3 | 5 032 694 |
+| 800, then `collect_cycles()` | 1602 | 20 073.2 | 4 486 103 |
+| 100, released with `unlisten()` | 2 | 127.2 | 18 238 |
+| 300, released with `unlisten()` | 2 | 327.2 | 45 616 |
+| 800, released with `unlisten()` | 2 | 827.2 | 116 029 |
+| 800, `unlisten()` then `collect_cycles()` | 2 | 827.0 | 114 508 |
 
-A send costs 27 allocations on a fresh context and 20 073 after 800 cycles,
-growing without bound. Dropping a `Listener` without calling `unlisten()`
-retains its nodes permanently, and `collect_cycles()` does not reclaim them.
-Even the well-behaved path, which does return `node_count` to 2, leaves sends
-twelve times more expensive than they started and never recovers.
+Both halves of that table grow linearly and without bound, and they are not the
+same problem. Dropping a `Listener` without calling `unlisten()` retains its
+nodes: `node_count` climbs by two per cycle and `collect_cycles()` will not
+bring it down. Calling `unlisten()` does keep `node_count` at 2 — and a send
+still costs one extra allocation for every subgraph the context has ever seen,
+which no amount of collection recovers. A well-behaved program that creates and
+releases a subgraph a thousand times has made every subsequent event thirty
+times more expensive, with nothing in `node_count` to show for it.
 
 I am not diagnosing either of those here. The point is that both are
 reproducible, both are the kind of thing that shows up in a real application
@@ -66,10 +77,12 @@ Some things I measured that the design leans on:
   context are cheap but not free.** A node on the firing path costs roughly
   10 000 instructions per event. A node merely existing in the same context
   costs about 61 — measured by sweeping an unfired side-graph from 0 to 200
-  nodes, which moved a 64-event body from 1 585 890 to 2 363 302 instructions,
+  nodes, which moved a 64-event body from 1 585 052 to 2 362 580 instructions,
   linearly. Wall clock could not see this at all: the same sweep looked flat at
-  ~6.3 µs, because 61 instructions per node is buried in timing noise. That is
-  a useful demonstration of why tier 1 uses callgrind.
+  ~7.8 µs, because 61 instructions per node is buried in timing noise. That is
+  a useful demonstration of why tier 1 uses callgrind. Allocation counts miss it
+  too, and for a better reason — an idle node costs no allocations at all, only
+  instructions.
 
   It is also what makes the degradation above so violent. The dead nodes there
   are not idle bystanders — they hang off the sink being fired, so they are on
@@ -77,8 +90,9 @@ Some things I measured that the design leans on:
 
   Two arms differing by one node therefore differ by that node's firing cost
   plus its global cost, which is the number we want, as long as the arms are
-  otherwise identical. Heap state is not a confound: padding the heap with 5000
-  unrelated allocations moved the same body by less than 0.2%.
+  otherwise identical. Heap state is not the explanation: padding the context
+  with 5000 live heap blocks instead of nodes moves the same body by 1.2%, in
+  the *opposite* direction, against the 49% that 200 idle nodes add.
 - **Transaction overhead dominates fine-grained sends.** 2000 sends through
   `sink -> map -> listen` cost 43 allocations each; the same 2000 sends inside
   one `ctx.transaction()` cost 1 each. Roughly 26 of the 27 baseline
@@ -87,8 +101,9 @@ Some things I measured that the design leans on:
   O(downstream) and not O(graph). Growing the downstream graph from 0 to 64
   nodes leaves a flip at 68 allocations flat; growing the *upstream* branch
   over the same range takes it from 68 to 209.
-- **Allocation counts are exactly reproducible.** Three runs of a twenty-shape
-  ledger returned byte-identical integers.
+- **Allocation counts are exactly reproducible.** Repeated runs of a
+  twenty-shape ledger return byte-identical integers; only the timing column
+  moves.
 - **Every `switch_s` and `switch_c` site pays for a `Cell::map` it does not
   need.** Both wrappers do `csa.map(|sa| sa.impl_.clone())` before reaching the
   switch nodes proper (`src/cell.rs:366` and `:373`), purely to unwrap a
@@ -97,8 +112,10 @@ Some things I measured that the design leans on:
   that is eighteen nodes of pure overhead in one application. Worth an issue in
   its own right; noted here because it is the sort of thing the suite is
   supposed to find, and it turned up before the suite exists.
-- **Callgrind instruction counts vary by less than 0.01% run to run.** A 1%
-  regression in a single combinator sits about 150× above that noise floor.
+- **Callgrind instruction counts vary by at most 0.013% run to run**, across
+  all eighteen arms of the bench, and the four small ones came back
+  bit-identical. A 1% regression in a single combinator sits roughly 75× above
+  that noise floor.
 
 Every number above is reproducible, and phase 1 of the plan turns the
 allocation counts into assertions so they stay that way.
@@ -127,14 +144,14 @@ That distinction matters, because the marginal cost of a node is not uniform:
 
 | chain length | instructions (64 sends) | marginal instr/node/send |
 |---|---|---|
-| 0 | 935 075 | — |
-| 1 | 1 581 998 | 10 106 |
-| 2 | 2 196 606 | 9 605 |
-| 3 | 3 083 958 | 13 869 |
-| 4 | 3 752 205 | 10 439 |
-| 8 | 6 729 475 | 11 630 |
+| 0 | 934 752 | — |
+| 1 | 1 581 675 | 10 108 |
+| 2 | 2 196 345 | 9 604 |
+| 3 | 3 083 678 | 13 865 |
+| 4 | 3 751 946 | 10 442 |
+| 8 | 6 728 919 | 11 608 |
 
-Those numbers reproduce to within 0.01%, so the spread is structural — what a
+Those numbers reproduce to within 0.013%, so the spread is structural — what a
 node costs depends on where in the chain it sits. Subtracting arms would
 therefore give a stable number that is not quite "the cost of `map`". Reading
 each arm's absolute count against its own history gives exactly what we want:

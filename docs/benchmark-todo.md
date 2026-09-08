@@ -1,7 +1,8 @@
 # Benchmark suite: TODO
 
 Tracks [the implementation plan](benchmark-plan.md). Phases are ordered; items
-within a phase mostly are not.
+within a phase mostly are not. Numbers to assert against come from [the
+`research` crate](../research).
 
 ## Phase 0 — scenario crate
 
@@ -19,6 +20,8 @@ within a phase mostly are not.
 - [ ] Extend the table to every combinator the ledger will cover
 - [ ] `node_count()` returns to baseline after a subgraph is released — expect **fail**, mark `#[ignore]`
 - [ ] Per-send allocation count returns to baseline after release — expect **fail**, mark `#[ignore]`
+- [ ] Write both as a slope (cost after 800 cycles == cost after 100), not a threshold
+- [ ] Note in the test file that `once` reads below baseline in steady state, and why
 - [ ] File an issue for `drop(Listener)` retaining nodes that `collect_cycles()` will not reclaim
 - [ ] File an issue for send cost not recovering after `unlisten()` (27 → 327 allocs, sticky)
 - [ ] Link both issues from the `#[ignore]` attributes

@@ -1,7 +1,9 @@
 # Benchmark suite: implementation plan
 
 Companion to [ADR 1](adr/0001-benchmark-suite-structure.md). That document
-argues for the structure; this one says how to build it and in what order.
+argues for the structure; this one says how to build it and in what order. The
+measurements both rely on come from [the `research` crate](../research), which
+is where to go to check a number or add one.
 
 Every phase is meant to land on its own and leave the suite more useful than
 it was. Nothing here depends on a later phase to be worth having.
@@ -50,31 +52,51 @@ every platform. Do it first.
 1. **Per-event allocation counts.** For each shape, assert the exact number of
    allocations one event costs. Starting values, measured at 4316728:
 
-   | shape | allocs/event |
-   |---|---|
-   | `sink -> listen` | 27 |
-   | `+ map` / `map_to` / `filter` (passing) / `filter_map` | 43 |
-   | `+ filter` (dropping) | 27 |
-   | `+ merge` / `or_else` | 51 |
-   | `+ snapshot` / `gate` | 47 |
-   | `+ Operational::defer` | 63 |
-   | `+ accum` | 75 |
-   | `cell_sink -> updates` | 41 |
-   | `+ Cell::map` | 59 |
-   | `+ lift2` | 109 |
-   | `+ lift3` | 173 |
-   | `switch_s`, firing the selected stream | 72 |
-   | `switch_c`, firing the selected cell | 101 |
+   | shape | allocs/event | over baseline |
+   |---|---|---|
+   | `sink -> listen` | 27 | baseline |
+   | `+ map` / `map_to` / `filter` (passing) / `filter_map` | 43 | +16 |
+   | `+ filter` (dropping) | 27 | +0 |
+   | `+ hold -> updates` | 28 | +1 |
+   | `+ snapshot` / `gate` | 47 | +20 |
+   | `+ merge` / `or_else` | 51 | +24 |
+   | `+ Operational::defer` | 62 | +35 |
+   | `+ accum -> updates` | 75 | +48 |
+   | `+ collect` | 104 | +77 |
+   | `cell_sink -> updates` | 41 | baseline |
+   | `+ Cell::map` | 59 | +18 |
+   | `+ Cell::value` | 83 | +42 |
+   | `+ lift2` | 109 | +68 |
+   | `+ lift3` | 173 | +132 |
+   | `switch_s`, firing the selected stream | 72 | — |
+   | `switch_c`, firing the selected cell | 88 | — |
 
-   These reproduce byte-identically across runs. Write them as a table the test
-   walks, so adding a combinator is one row.
+   Produced by `research/src/bin/adr0001_alloc_ledger.rs`, which is where to go
+   to add a row or check one. They reproduce byte-identically across runs.
+   Write them as a table the test walks, so adding a combinator is one row.
+
+   One trap, and it is the reason to read the experiment rather than copy the
+   numbers: `+ once` measures **15**, which is *below* the 27-allocation
+   baseline. Nothing is cheaper than nothing — `once` has already fired by the
+   time the steady-state measurement starts, so every later event dies at that
+   node. Any combinator whose behaviour changes after the first event needs its
+   assertion written against a stated event index, not against a steady-state
+   average.
 
 2. **Lifecycle invariants.** After building and releasing a subgraph on a
    long-lived context, `node_count()` must return to its starting value, and the
    per-send allocation count must return to its starting value. Both currently
-   fail. Land them as `#[ignore]`d tests with the measured numbers recorded, and
-   open an issue for each; they become the acceptance criteria for whoever fixes
-   the underlying behaviour.
+   fail, and both fail *without bound* —
+   `research/src/bin/adr0001_dynamic_graphs.rs` shows a send going from 27
+   allocations to 827 over 800 release cycles even on the well-behaved
+   `unlisten()` path, where `node_count` stays correct at 2 throughout. Land
+   them as `#[ignore]`d tests with the measured numbers recorded, and open an
+   issue for each; they become the acceptance criteria for whoever fixes the
+   underlying behaviour.
+
+   Write these as a *slope*, not a threshold: assert that the cost after 800
+   cycles equals the cost after 100. A threshold would pass again the moment
+   someone halves the per-cycle leak without removing it.
 
 Assert on a *range* rather than an exact integer only where a number turns out
 not to be stable. So far none of them are unstable.

@@ -1,0 +1,19 @@
+[package]
+name = "research"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Recorded experiments backing the architecture decision records"
+
+[dependencies]
+sodium-rust = { path = ".." }
+
+# iai-callgrind drives valgrind, which is Linux-only, so the bench target is
+# too. Keeping the dependency Linux-only lets `cargo test --workspace` and
+# `cargo clippy --workspace --all-targets` succeed everywhere else.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+iai-callgrind = "0.16.1"
+
+[[bench]]
+name = "adr0001_instruction_counts"
+harness = false
