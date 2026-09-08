@@ -6,6 +6,8 @@ use std::{
 };
 
 mod common_test;
+mod denotational_test;
+mod listener_test;
 mod loop_test;
 mod mem_test;
 mod node_test;
@@ -2645,4 +2647,379 @@ fn map_with_nested_data_lift_in_transaction() {
 #[test]
 fn map_with_nested_data_lift_no_transaction() {
     map_with_nested_data_lift(false);
+}
+
+// `or_else` prefers the left hand side, even when both sides are
+// derived from the same sink and so always fire together.
+#[test]
+fn or_else_left_bias() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s = sodium_ctx.new_stream_sink::<i32>();
+        let s2 = s.stream().map(|x: &i32| 2 * x);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = s2
+                .or_else(&s.stream())
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        s.send(7);
+        s.send(9);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![14, 18], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// The mirror image: the sink itself on the left wins over the mapped
+// stream on the right.
+#[test]
+fn or_else_simultaneous2() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s = sodium_ctx.new_stream_sink::<i32>();
+        let s2 = s.stream().map(|x: &i32| 2 * x);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = s
+                .stream()
+                .or_else(&s2)
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        s.send(7);
+        s.send(9);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![7, 9], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// Two coalescing sinks that keep the newest value, merged left-biased.
+// Whichever order they are sent in within a transaction, the left hand
+// sink's last value wins.
+#[test]
+fn or_else_simultaneous1() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s1 = sodium_ctx.new_stream_sink_with_coalescer(|_: &i32, r: &i32| *r);
+        let s2 = sodium_ctx.new_stream_sink_with_coalescer(|_: &i32, r: &i32| *r);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = s2
+                .stream()
+                .or_else(&s1.stream())
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        sodium_ctx.transaction(|| {
+            s1.send(7);
+            s2.send(60);
+        });
+        sodium_ctx.transaction(|| {
+            s1.send(9);
+        });
+        sodium_ctx.transaction(|| {
+            s1.send(7);
+            s1.send(60);
+            s2.send(8);
+            s2.send(90);
+        });
+        sodium_ctx.transaction(|| {
+            s2.send(8);
+            s2.send(90);
+            s1.send(7);
+            s1.send(60);
+        });
+        sodium_ctx.transaction(|| {
+            s2.send(8);
+            s1.send(7);
+            s2.send(90);
+            s1.send(60);
+        });
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![60, 9, 90, 90, 90], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// A stream loop that feeds back through `defer`, so each step runs in
+// its own transaction immediately after the previous one.
+#[test]
+fn stream_loop_defer() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let stream_sink = sodium_ctx.new_stream_sink::<i32>();
+        let stream = sodium_ctx.transaction(|| {
+            let stream_loop = sodium_ctx.new_stream_loop::<i32>();
+            let stream_local = Operational::defer(
+                &stream_sink
+                    .stream()
+                    .or_else(&stream_loop.stream())
+                    .filter(|v: &i32| *v < 5)
+                    .map(|v: &i32| v + 1),
+            );
+            stream_loop.loop_(&stream_local);
+            stream_local
+        });
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = stream.listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        stream_sink.send(2);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![3, 4, 5], *out);
+        }
+    }
+}
+
+// A coalescing sink collapses every send in a transaction into one
+// event.
+#[test]
+fn coalesce2() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s = sodium_ctx.new_stream_sink_with_coalescer(|x: &i32, y: &i32| x + y);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = s
+                .stream()
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        sodium_ctx.transaction(|| {
+            for i in 1..=5 {
+                s.send(i);
+            }
+        });
+        sodium_ctx.transaction(|| {
+            for i in 6..=10 {
+                s.send(i);
+            }
+        });
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![15, 40], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// FIXME: this overflows the stack, and must stay ignored because a
+// stack overflow aborts the whole test process rather than failing one
+// test.
+//
+// Chains up to about 1800 `map` nodes are fine; 2000 blows the stack
+// during *construction*, before any event is sent. GcCtx::mark_gray,
+// scan and scan_black all recurse over the node graph, one frame per
+// node, and collect_cycles runs at the end of every transaction --
+// including the internal one each `map` opens. Time also grows
+// superlinearly: depth 999 takes ~2.5s and depth 1500 ~5.8s in a debug
+// build.
+#[ignore = "chains deeper than ~1800 nodes overflow the stack in collect_cycles"]
+#[test]
+fn deep_chain_grows_prioritized_queue() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    for depth in [999, 1000, 1001, 2000, 5000] {
+        let s = sodium_ctx.new_stream_sink::<i32>();
+        let mut stream = s.stream();
+        for _ in 0..depth {
+            stream = stream.map(|v: &i32| v + 1);
+        }
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = stream.listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        s.send(0);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![depth], *out, "chain of depth {}", depth);
+        }
+    }
+    // A shallow chain must still work afterwards.
+    let shallow_sink = sodium_ctx.new_stream_sink::<i32>();
+    let shallow_out = Arc::new(Mutex::new(Vec::new()));
+    let shallow_listener;
+    {
+        let shallow_out = shallow_out.clone();
+        shallow_listener = shallow_sink
+            .stream()
+            .map(|v: &i32| v + 1)
+            .listen(move |a: &i32| shallow_out.lock().as_mut().unwrap().push(*a));
+    }
+    shallow_sink.send(1);
+    shallow_listener.unlisten();
+    {
+        let lock = shallow_out.lock();
+        let shallow_out: &Vec<i32> = lock.as_ref().unwrap();
+        assert_eq!(vec![2], *shallow_out);
+    }
+}
+
+// Lifting a cell with a cell derived from it: both sides update in the
+// same transaction, and the lift must fire once per update.
+#[test]
+fn lift_simultaneous_updates() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let cell_sink = sodium_ctx.new_cell_sink(1);
+        let cell = cell_sink.cell().map(|v: &i32| 2 * v);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = cell_sink
+                .cell()
+                .lift2(&cell, |x: &i32, y: &i32| x + y)
+                .updates()
+                .listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        cell_sink.send(2);
+        cell_sink.send(7);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![6, 21], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+// FIXME: this asserts [1, 3, 5] and gets [0, 3, 5].
+//
+// `Cell::map` does not run its function when the cell is built -- it
+// defers it until the cell is first sampled or listened to. So the
+// `hold` here is only constructed at listen time, after `s.send(1)` has
+// already gone by, and starts from its default 0 instead of 1. In the
+// .NET binding the mapped value exists from construction, so the hold is
+// in place in time to see the event.
+#[ignore = "Cell::map defers its function until the cell is first sampled"]
+#[test]
+fn lazy_cell_creation() {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    {
+        let s = sodium_ctx.new_stream_sink::<i32>();
+        let c = {
+            let s = s.clone();
+            sodium_ctx
+                .new_cell(1)
+                .map(move |_: &i32| s.stream().hold(0))
+        };
+        s.send(1);
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let l;
+        {
+            let out = out.clone();
+            l = Cell::switch_c(&c).listen(move |a: &i32| out.lock().as_mut().unwrap().push(*a));
+        }
+        s.send(3);
+        s.send(5);
+        l.unlisten();
+        {
+            let lock = out.lock();
+            let out: &Vec<i32> = lock.as_ref().unwrap();
+            assert_eq!(vec![1, 3, 5], *out);
+        }
+    }
+}
+
+// Pair each cell value with the one before it, using a constant-lazy
+// cell to supply the very first value with no predecessor.
+fn cell_values_with_previous(send_before_listen: bool) -> Vec<(i32, Option<i32>)> {
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+    let s = sodium_ctx.new_stream_sink::<i32>();
+    let c = s.stream().hold(0);
+    let out = Arc::new(Mutex::new(Vec::new()));
+    let l;
+    {
+        let out = out.clone();
+        l = sodium_ctx.transaction(|| {
+            let initial = Stream::new(sodium_ctx)
+                .hold_lazy(c.sample_lazy())
+                .value()
+                .map(|v: &i32| (*v, None));
+            let r = c
+                .updates()
+                .snapshot(&c, |n: &i32, o: &i32| (*n, Some(*o)))
+                .or_else(&initial);
+            if send_before_listen {
+                s.send(1);
+            }
+            r.listen(move |a: &(i32, Option<i32>)| out.lock().as_mut().unwrap().push(*a))
+        });
+    }
+    let first = if send_before_listen { 2 } else { 1 };
+    for i in first..first + 4 {
+        s.send(i);
+    }
+    l.unlisten();
+    let lock = out.lock();
+    let out: &Vec<(i32, Option<i32>)> = lock.as_ref().unwrap();
+    out.clone()
+}
+
+#[test]
+fn cell_values_with_previous_no_initial_update() {
+    assert_eq!(
+        vec![
+            (0, None),
+            (1, Some(0)),
+            (2, Some(1)),
+            (3, Some(2)),
+            (4, Some(3))
+        ],
+        cell_values_with_previous(false)
+    );
+}
+
+#[test]
+fn cell_values_with_previous_having_initial_update() {
+    assert_eq!(
+        vec![
+            (1, Some(0)),
+            (2, Some(1)),
+            (3, Some(2)),
+            (4, Some(3)),
+            (5, Some(4))
+        ],
+        cell_values_with_previous(true)
+    );
 }
