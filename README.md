@@ -4,6 +4,7 @@
 [![crates.io](https://img.shields.io/crates/v/sodium.svg)](https://crates.io/crates/sodium)
 [![docs.rs](https://docs.rs/sodium/badge.svg)](https://docs.rs/sodium)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/RadicalZephyr/sodium-rust?utm_source=badge)
 
 A Functional Reactive Programming (FRP) library for Rust, part of the
 [Sodium](https://github.com/SodiumFRP) family of FRP libraries.
@@ -100,7 +101,7 @@ This is a Cargo workspace.
 | Path | Contents |
 | --- | --- |
 | `src/` | the `sodium` library |
-| `benches/` | Criterion benchmarks (`cargo bench`) |
+| `benches/` | Criterion benchmarks (`cargo bench`), also measured in CI by [CodSpeed](https://app.codspeed.io/RadicalZephyr/sodium-rust) |
 | `coz-driver/` | a causal-profiling workload — see [`coz-driver/README.md`](coz-driver/README.md) |
 | `tools/` | developer scripts, including the Coz installer |
 | `docs/` | implementation notes |
@@ -127,6 +128,17 @@ package, which makes it the sole default member, so a bare `cargo test` will
 not compile `coz-driver`.
 
 Tests run against stable, beta and nightly; nightly is allowed to fail.
+
+The benchmarks in `benches/` still run locally under Criterion with
+`cargo bench`. CI measures the same benchmarks with CodSpeed's CPU simulation
+instrument, which reports a per-benchmark comparison against `main` on every
+pull request. To reproduce a CI measurement locally you need the
+[CodSpeed CLI](https://codspeed.io/docs/cli) and `cargo-codspeed`:
+
+```shell
+cargo codspeed build --measurement-mode simulation
+codspeed run --mode simulation -- cargo codspeed run
+```
 
 User-visible changes should get an entry in [`CHANGELOG.md`](CHANGELOG.md),
 which follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and

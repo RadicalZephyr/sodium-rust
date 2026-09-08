@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since they appear in the public `*_with_deps` signatures.
 - `Cell::listen_weak` now honours declared dependencies, matching
   `Stream::listen_weak` and `Cell::listen`.
+- The benchmarks are now built against `codspeed-criterion-compat` (a
+  dev-dependency change only, the Criterion API is unchanged) so CI can measure
+  them with CodSpeed. `benches/combinators.rs` adds coverage for lifting, state
+  accumulation, switching, routing, transactions and graph setup/teardown.
 
 ### Added
 
