@@ -12,6 +12,7 @@ mod loop_test;
 mod mem_test;
 mod node_test;
 mod transaction_test;
+mod cell_state_while_unlistened;
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
