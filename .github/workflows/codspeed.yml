@@ -1,0 +1,47 @@
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  # `workflow_dispatch` lets CodSpeed trigger a backtest run to generate
+  # initial baseline data.
+  workflow_dispatch:
+
+name: Benchmark sodium-rust
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Superseded PR runs are wasted work, but let pushes to main finish so every
+  # commit there keeps its own benchmark result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  # Required for OpenID Connect authentication with CodSpeed.
+  id-token: write
+
+jobs:
+
+  benchmarks:
+    name: CodSpeed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Only main writes to the cache; PR branches read from it. Keeps
+          # short-lived branches from evicting main's entry under the repo
+          # cache quota.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-codspeed
+        run: cargo install cargo-codspeed --locked
+      # cargo-codspeed builds the bench targets with the instrumentation
+      # CodSpeed needs; a plain `cargo bench` build cannot be measured.
+      - name: Build the benchmark targets
+        run: cargo codspeed build --measurement-mode simulation
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: cargo codspeed run
