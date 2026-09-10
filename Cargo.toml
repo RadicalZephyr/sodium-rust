@@ -1,5 +1,5 @@
 [workspace]
-members = ["coz-driver"]
+members = ["coz-driver", "docs/adr/research"]
 
 [package]
 name = "sodium-rust"

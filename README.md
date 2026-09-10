@@ -103,7 +103,8 @@ This is a Cargo workspace.
 | `benches/` | Criterion benchmarks (`cargo bench`) |
 | `coz-driver/` | a causal-profiling workload — see [`coz-driver/README.md`](coz-driver/README.md) |
 | `tools/` | developer scripts, including the Coz installer |
-| `docs/` | implementation notes |
+| `docs/` | implementation notes, and the [architecture decision records](docs/adr/) |
+| `docs/adr/research/` | the `adr-research` crate — experiments backing the ADRs |
 
 ## Contributing
 

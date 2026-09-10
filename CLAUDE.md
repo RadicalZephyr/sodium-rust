@@ -1,0 +1,188 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+```shell
+cargo test --workspace                                # everything
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+```
+
+Those are the three commands CI runs, so running them before pushing is the
+fastest way to know a change will pass.
+
+`--workspace` is load-bearing. The workspace root is itself a package, which
+makes it the sole default member, so a bare `cargo test` skips `coz-driver` and
+`adr-research` entirely.
+
+Running one test:
+
+```shell
+cargo test --lib tests::switch_s                       # unit tests live in src/tests.rs
+cargo test --lib tests::mem_test::mem                  # and its submodules
+cargo test --test closure_type_inference infers_map    # integration tests in tests/
+cargo test --test ui                                   # the trybuild suite
+RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
+```
+
+`RUST_LOG=trace` is worth reaching for on any memory or propagation bug: the
+cycle collector logs the whole graph it is walking, node by node, with the
+`NodeName`s from `src/impl_/name.rs` attached.
+
+The `compile_fail` cases under `tests/ui/` carry expected rustc output, which is
+not stable across releases. After a deliberate change to a diagnostic:
+
+```shell
+TRYBUILD=overwrite cargo test --test ui
+```
+
+Benchmarks are Criterion, and the causal profiler is a separate workload with
+its own setup — see [`coz-driver/README.md`](coz-driver/README.md):
+
+```shell
+cargo bench
+cargo build --release -p coz-driver && coz run --- ./target/release/coz-driver
+```
+
+MSRV is declared as `rust-version` in the root `Cargo.toml` and checked by CI
+with `cargo check -p sodium-rust` on that toolchain. The library alone,
+deliberately: the dev-dependency tree reaches edition-2024 manifests the MSRV's
+cargo cannot parse, so `src/` is what has to hold the line. `benches/` already
+opts out with `#![allow(clippy::incompatible_msrv)]`.
+
+## Architecture
+
+### Two layers, and why every combinator is written twice
+
+`src/*.rs` is the public API; `src/impl_/*.rs` is the implementation. Each
+public type is a newtype over its implementation counterpart — `Stream<A>`
+holds a `pub impl_: impl_::stream::Stream<A>` and forwards.
+
+The split is not ceremony. The public layer is bounded on `Fn`/`FnMut`
+directly, because rustc's closure signature deduction only looks through the
+`Fn` family; a user-defined trait bound defeats it and forces callers to
+annotate every closure parameter. The implementation layer is bounded on the
+`IsLambda1`..`IsLambda6` traits, which carry an optional `Vec<Dep>` alongside
+the function. The public `*_with_deps` variants wrap a closure with `lambda1`..
+`lambda6` on the way through; the plain variants pass the bare closure, whose
+`deps_op()` is `None`. `tests/closure_type_inference.rs` documents the full
+diagnosis and guards against a regression.
+
+So adding a combinator means touching both layers, and usually adding a
+`*_with_deps` sibling.
+
+### The node graph
+
+Everything reduces to `impl_::node::Node`. A `Node` is an update closure plus
+its edges: dependencies (upstream, held strongly) and dependents (downstream,
+held weakly). A new computation means a new `Node`.
+
+The asymmetry is the whole memory model. A `Listener` roots a chain of nodes
+through the strong upstream edges; when the listener is dropped, whatever it
+depended on — and nothing else depends on — becomes collectable.
+`docs/internals/insights.md` is the short version of this.
+
+An update closure reads its input's pending firing with
+`Stream::with_firing_op`, applies the user closure, and calls `Stream::_send`
+on its own stream. A firing lives in `StreamData::firing_op` for the duration
+of the transaction and is cleared by a `post` callback.
+
+### Transactions
+
+`impl_::sodium_ctx::SodiumCtx` holds the transaction state. `enter_transaction`
+/ `leave_transaction` maintain a depth counter, and hitting zero runs
+`end_of_transaction`, which is where propagation actually happens:
+
+1. drain `pre_eot` callbacks,
+2. loop draining `changed_nodes`, calling `update_node` on each until nothing
+   is left,
+3. drain `pre_post` (this is where `visited` flags are reset), then `post`
+   (this is where firings are cleared),
+4. `collect_cycles`, once the outermost transaction is done.
+
+`update_node` is a depth-first walk guarded by an atomic `visited` flag: it
+updates a node's dependencies before the node itself, runs the update closure
+only if some dependency actually changed, and then pushes into dependents. That
+ordering is what makes the graph glitch-free — a node never observes a
+half-updated set of inputs.
+
+Nested transactions are ordinary: only the outermost one propagates.
+
+### Garbage collection
+
+An FRP graph is genuinely cyclic — `switch_s`, `switch_c`, `CellLoop` and
+`StreamLoop` all close loops — so reference counting alone leaks.
+`src/impl_/gc_node.rs` is a synchronous Bacon–Rajan cycle collector: nodes are
+coloured Black/Gray/Purple/White, candidate roots are buffered, and
+`mark_roots` / `scan_roots` / `collect_roots` run at the end of the outermost
+transaction.
+
+Every `GcNode` carries two closures the collector depends on:
+
+- a **deconstructor**, which drops the node's outgoing references, and
+- a **trace**, which hands the collector every `GcNode` this one holds.
+
+Both have to be exactly right. A trace that misses an edge frees live data; a
+trace that names an edge the node does not hold corrupts the reference-count
+adjustment and leaks. This is why a closure capturing FRP nodes has to declare
+them: `Dep` is just a handle on a `GcNode`, and `*_with_deps` exists so the
+tracer can see through a closure it cannot introspect.
+
+`GcNodeData` carries hand-written `unsafe impl Send/Sync`, which is why CI runs
+macOS and Windows in addition to Linux.
+
+### Threading
+
+`ThreadedMode` abstracts how `update_node` fans out over dependencies.
+`single_threaded_mode` (run inline) is the only one wired up;
+`simple_threaded_mode` (thread per fan-out) exists and is dead code, and a
+thread-pool mode is a TODO. Anything touching propagation should keep working
+under both.
+
+## Tests
+
+- `src/tests.rs` and `src/tests/` — the main suite, inside the crate so it can
+  reach `impl_`. It is also the most complete set of worked examples in the
+  repository. Most tests end in `assert_memory_freed`, which collects cycles
+  and asserts `node_count == 0`: a new combinator with a wrong trace or
+  deconstructor fails here rather than leaking quietly.
+- `tests/closure_type_inference.rs` — the closure ergonomics guarantee, from
+  outside the crate. `infers_*` uses bare unannotated closures; `with_deps_*`
+  covers the explicit-`Dep` siblings.
+- `tests/ui/` via `tests/ui.rs` — the same guarantee at compile time, plus
+  reduced repros of the *old* failure so the reasoning stays checked rather
+  than merely asserted. The `compile_fail` cases are gated to stable with
+  `rustversion`.
+
+## Conventions
+
+### Architecture decision records
+
+ADRs live in [`docs/adr/`](docs/adr/), one per file, `NNNN-kebab-case-title.md`.
+Every record opens as a **Draft** — drafts are edited freely without recording
+their own revision history; an accepted record is superseded rather than
+rewritten. Where discussion surfaced a conflict or a trade-off, write it into
+the section it belongs to. See [`docs/adr/README.md`](docs/adr/README.md).
+
+**Any code that produces concrete data used in the argumentation of an ADR must
+live in the `adr-research` workspace crate at
+[`docs/adr/research/`](docs/adr/research/)**, as a binary named after the ADR it
+serves (`src/bin/0001-some-decision.rs`, run with
+`cargo run --release -p adr-research --bin 0001-some-decision`). A number quoted
+in an ADR has to be re-derivable from a checkout; an experiment that only ever
+existed in a scratch buffer makes the ADR an assertion rather than an argument.
+Dependencies added there land in the `cargo-deny` graph like any other, so they
+must be license-compatible with BSD-3-Clause.
+
+### Changelog
+
+User-visible changes get an entry in `CHANGELOG.md` under `Unreleased`, which
+follows Keep a Changelog and semver. Breaking changes are marked
+`**Breaking:**` and show a before/after snippet.
+
+### Cargo.lock
+
+Deliberately not committed, so the scheduled `cargo-deny` advisory run resolves
+fresh every night and catches new advisories against unchanged code.
