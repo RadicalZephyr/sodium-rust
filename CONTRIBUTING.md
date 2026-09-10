@@ -61,18 +61,23 @@ the directory as the current state of the project's decisions, and reach for
 [`0001-recording-important-decisions.md`](docs/decisions/0001-recording-important-decisions.md)
 argues for them.
 
-A record's status moves with the work, and each transition is a commit you make
-deliberately:
+A record's status is a dated transition log in a collapsed block at the top of
+the file, and each row is a commit you add deliberately:
 
-| When | Status becomes |
+| When | Row you add |
 | --- | --- |
-| while the record's PR is open | `Draft` |
-| a commit before that PR merges | `Accepted YYYY-MM-DD -- not yet implemented` |
-| the PR that finishes the work | *the status line is deleted* |
+| writing the record | `Drafted` |
+| a commit before its pull request merges | `Accepted` |
+| the pull request that finishes the work | `Implemented` |
 | a commit before a superseding record merges | `Superseded by NNNN` |
 
-There is no `Implemented` status: decided-and-built is the steady state and says
-so by carrying no status line at all.
+The current state is the last row, restated in the summary line so a reader who
+never expands the block still knows where the record stands. The gap between
+`Accepted` and `Implemented` is the number worth watching -- a decision the code
+never honoured is a row that never arrived.
+
+Only state transitions belong in the log. A change to what a record *says* is a
+dated note in the body, beside the reasoning it concerns.
 
 Code that produces concrete data used in the argumentation of an ADR has to be
 committed somewhere a reader can run it -- a number quoted in an ADR has to be
@@ -85,9 +90,9 @@ recorded in the ADR.
 **Reviewing a record includes checking two things.** First the version stamp: a
 Playground link re-runs against whatever stable is current when it is clicked, so
 any rustc output quoted in a record has to say which version produced it, and a
-record carrying none cannot be checked later. Second the status line, because its
-absence is a real state -- a record merging without one is claiming the work is
-already done. Neither should be approved on autopilot.
+record carrying none cannot be checked later. Second the status log, which needs
+its `Accepted` row before the record merges. Neither should be approved on
+autopilot.
 
 ## Tests and research are not the same thing
 

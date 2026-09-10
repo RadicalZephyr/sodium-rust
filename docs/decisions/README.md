@@ -20,8 +20,8 @@ survives a retitle.
 Suggested sections, though the record should follow the argument rather than the
 template:
 
-- **Status** -- omitted entirely when the decision is made and built. See below.
-- **Date** -- YYYY-MM-DD, when the record was written.
+- **Status** -- the transition log, described below. It replaces a separate
+  `Date` field, because when the record was written is its first transition.
 - **Context** -- the forces in play, including anything measured.
 - **Decision** -- what we are doing.
 - **Consequences** -- what this buys and what it costs, including the parts we
@@ -53,35 +53,65 @@ Accretion, not overwriting. Without that discipline a mutable record drifts
 toward what we now think we thought, and stops being evidence of a commitment
 made under specific information.
 
+A record still in `Draft` is exempt: while its pull request is open it is being
+written, not revised, so edit it freely without dating anything. The
+dated-addition rule protects a decision that has already been made from being
+quietly reworded in hindsight, and a draft has not made one yet.
+
 [`0001-recording-important-decisions.md`](0001-recording-important-decisions.md)
 argues for all of this.
 
-## Status
+## Status is a transition log
 
-The `Status` line records **deviation from the expected lifecycle**. Made and
-built is the terminal state and carries no line at all; every status that exists
-names a way the record is not in that state.
+State changes are exactly the information that would otherwise live only in git,
+so they go in the record. Each record opens with a collapsed log: the summary
+line carries the current state, expanding it gives the history.
 
-| Status | Meaning | Set when |
-| --- | --- | --- |
-| `Draft` | still being argued | while the pull request is open |
-| `Accepted YYYY-MM-DD -- not yet implemented` | decided, not yet built | a commit before the record's PR merges |
-| *(no status line)* | decided and built | the line is deleted by the last PR implementing it |
-| `Superseded by NNNN` | replaced | a commit before the superseding record merges |
-| `Deprecated -- see [section]` | withdrawn, not replaced | when the reversal is written into the record |
+```markdown
+<details>
+<summary><strong>Status:</strong> Implemented 2026-11-03</summary>
 
-Two consequences worth knowing:
+| Date | Transition |
+| --- | --- |
+| 2026-09-10 | Drafted |
+| 2026-09-24 | Accepted |
+| 2026-11-03 | Implemented |
 
-- The absence of a status is never reached by forgetting. A record merges
-  carrying its accepted date, and the line is *deleted* later, deliberately, by
-  the pull request that finishes the work.
-- The accepted date is not decoration. A record that sits unimplemented is the
-  hot air a decisions directory is prone to, and dating it makes it age in
-  public.
+</details>
+```
 
-`Deprecated` links to the section of its own record that explains the reversal.
-That is the difference from `Superseded`: superseded points outward to the
-successor, deprecated points inward to a dated addendum.
+The last row is the current state and the summary restates it, so there is one
+source of truth and a reader who never expands the block still knows where the
+record stands. The gap between `Accepted` and `Implemented` is the interesting
+number in there: a decision the code never honoured shows up as a row that never
+arrived.
+
+| Transition | Logged when |
+| --- | --- |
+| `Drafted` | the record is written -- this is what a `Date` field used to say |
+| `Accepted` | a commit before the record's pull request merges |
+| `Implemented` | the pull request that finishes the work |
+| `Superseded by NNNN` | a commit before the superseding record merges |
+| `Deprecated` | when the reversal is written into the record |
+
+`Superseded` points outward, to the record that replaced this one.
+`Deprecated` points inward: the summary links to the section of this record that
+explains the reversal, which is why a withdrawn decision needs no successor to
+stay accountable.
+
+### Two things the log is not
+
+**It is not an edit log.** Only state transitions go in it. Changes to the
+*content* of a record are dated additions in the body, where the reasoning they
+belong to is. A log that grows a row every time someone fixes a sentence is a bad
+reimplementation of `git log`, and it will be skipped for the same reason the
+real one is.
+
+**It is not a changelog at the bottom.** It records state, never reasoning --
+which is what keeps it consistent with writing conflicts and trade-offs into the
+section they concern. If a row starts wanting a sentence of explanation, that
+sentence is a dated addition in the body and the row just records that the
+transition happened.
 
 ## Editing versus superseding
 

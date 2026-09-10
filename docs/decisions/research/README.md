@@ -53,8 +53,8 @@ stamp such a record has to carry.
 ## Retirement
 
 An experiment is maintained while the decision it serves is still being argued
-or built. It leaves the moment that decision is done -- which the record states
-exactly, by dropping its status line -- through one of two exits:
+or built. It leaves the moment that decision is done -- which the record dates
+exactly, in the `Implemented` row of its status log -- through one of two exits:
 
 - **Deleted** -- it measured internals the ADR replaced. A binary that no
   longer compiles against the new code is deleted rather than repaired; cite

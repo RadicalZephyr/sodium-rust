@@ -182,20 +182,35 @@ argues for all of it; [`README.md`](docs/decisions/README.md) beside it has the
 rules, and where a conflict or trade-off came up it belongs in the section it
 concerns rather than a changelog at the bottom.
 
-The `Status` line records **deviation from the expected lifecycle**, so
-made-and-built carries no status at all:
+A record's status is a **dated transition log** in a collapsed `<details>` block
+at the top of the file, with the current state in the `<summary>` line:
 
-| Status | Meaning |
+```markdown
+<details>
+<summary><strong>Status:</strong> Implemented 2026-11-03</summary>
+
+| Date | Transition |
 | --- | --- |
-| `Draft` | still being argued; only ever on an open PR |
-| `Accepted YYYY-MM-DD — not yet implemented` | decided, not yet built |
-| *(no status line)* | decided and built — the steady state |
-| `Superseded by NNNN` | replaced; the reasoning is in the successor |
-| `Deprecated — see [section]` | withdrawn; the reasoning is a dated addendum inside the record |
+| 2026-09-10 | Drafted |
+| 2026-09-24 | Accepted |
+| 2026-11-03 | Implemented |
 
-Never add an `Implemented` status — the absence *is* that state, and the line is
-deleted by the PR that finishes the work rather than rewritten. Editing versus
-superseding: edit while the decision is still the decision; write a new record
+</details>
+```
+
+Transitions are `Drafted` (replacing a separate `Date` field), `Accepted` (a
+commit before the record's PR merges), `Implemented` (the PR that finishes the
+work), `Superseded by NNNN`, and `Deprecated`. The last row is the current state
+and the summary restates it.
+
+Two things the log is **not**. It is not an edit log — only state transitions go
+in it, and changes to a record's content are dated additions in the body next to
+the reasoning they concern. It is not a changelog at the bottom — it records
+state, never reasoning, which is what keeps it consistent with writing conflicts
+and trade-offs into the section they belong to. A row that wants a sentence of
+explanation means that sentence belongs in the body.
+
+Editing versus superseding: edit while the decision is still the decision; write a new record
 when someone following the old one would now do the wrong thing. Mechanically —
 if the change can be a dated addition it is an edit; if it means deleting a claim
 someone may have acted on, the old claim earns its own record.
@@ -223,8 +238,9 @@ version, so the link drifts; without the stamp a reader cannot tell whether
 rustc moved or the record was wrong.
 
 An experiment is maintained while the decision it serves is still being argued
-or built, and leaves the moment that decision is done — which the record states
-exactly, by dropping its status line. It goes by one of two exits — **deleted**
+or built, and leaves the moment that decision is done — which the record dates
+exactly, in the `Implemented` row of its status log. It goes by one of two
+exits — **deleted**
 (it measured internals the ADR replaced; a binary that no longer compiles is
 deleted, not repaired, and the ADR cites the commit that produced its numbers)
 or **promoted** (it still answers a live question, so it stopped being research:
@@ -232,7 +248,7 @@ a measurement worth re-running moves to `benches/`, a property we promise moves
 to `src/tests.rs`). It never lingers.
 
 So do not fix up a research binary that `cargo test --workspace` breaks on
-without first checking whether its record still has a status line; most records
+without first checking whether its record has logged `Implemented`; most records
 argue for changing the internals the experiment was measuring, and breaking is
 the expected end of its life. The crate is a staging area, not an archive, and
 should trend toward empty.

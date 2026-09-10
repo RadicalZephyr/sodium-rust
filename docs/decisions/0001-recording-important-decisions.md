@@ -1,13 +1,19 @@
 # 0001 -- Recording important decisions
 
-**Status:** Draft
-**Date:** 2026-09-10
+<details>
+<summary><strong>Status:</strong> Draft</summary>
 
-*This record is its own first worked example. It is `Draft` while its pull
-request is open, and because the rules it describes are implemented by the same
-pull request, the pre-merge commit **deletes** the status line rather than
-setting it to `Accepted` -- decided and built at once, which is the one case
-where those two transitions collapse into one.*
+| Date | Transition |
+| --- | --- |
+| 2026-09-10 | Drafted |
+
+</details>
+
+*This record is its own first worked example. Because the rules it describes are
+implemented by the same pull request, the pre-merge commit logs `Accepted` and
+`Implemented` on the same date -- the one case where those two transitions
+collapse, and a demonstration that the log can say so plainly where a single
+status field could not.*
 
 ## Context
 
@@ -87,35 +93,34 @@ case of this rule before we found the general one -- see *Evidence* below.
 
 ## The status field
 
-A record's `Status` line records **deviation from the expected lifecycle**, not
-position within it. Decided-and-built is the terminal, expected state, and it
-carries no status line at all. Every status that exists names a way a record is
-*not* in that state.
+A record's status is a **dated transition log**, collapsed at the top of the
+file, with the current state in the summary line. `README.md` has the shape and
+the set of transitions.
 
-`README.md` has the set and the transitions. Two things about it are worth
-arguing rather than merely stating.
+The reasoning that got us here is worth keeping, because we tried a simpler thing
+first. The original design was a single `Status` line that recorded *deviation
+from the expected lifecycle*: made-and-built was the terminal state and carried
+no line at all, on the argument that a field answering "what is unusual about
+this record?" does not need to say "nothing" -- the same shape as a passing test
+carrying no attribute where `#[ignore = "ADR-NNNN: ..."]` marks the one that
+fails.
 
-**Why "implemented" is an absent status.** It is uncomfortable to have exactly
-one state with no marker, and the discomfort is a reasonable programmer's
-instinct for a consistent rule. But the rule *is* consistent: the field answers
-"what is unusual about this record?", and "nothing" does not need a line to say
-it. The same shape already exists in this repository -- a test that passes
-carries no attribute, while `#[ignore = "ADR-NNNN: ..."]` marks the one that
-does not. If most records end up implemented, an `Implemented` line on each of
-them is noise obscuring the three that say something.
+That argument holds, and it is still why we do not want a bare `Implemented`
+line on forty records. But it defended an asymmetry rather than removing one, and
+it left a real cost: absence cannot distinguish "done" from "the author forgot."
 
-The real cost of the choice is not inconsistency but ambiguity: absence cannot
-distinguish "done" from "the author forgot." What defuses that is the
-transition rule. A decision record merges carrying `Accepted <date> -- not yet
-implemented`; the line is *deleted later*, in the pull request that finishes the
-work. Absence is reached by a deliberate edit in a specific commit, never by
-omission.
+The log dissolves both problems instead of trading between them. `Implemented`
+becomes a row rather than an absence, so the special case stops existing; and
+because every row is dated, the line is never noise -- `Accepted 2026-09-10` then
+`Implemented 2026-11-03` is a fact about how this project actually moves.
 
-**Why the accepted status carries a date.** A record that sits in "not yet
-implemented" forever is exactly the hot air a decisions directory is prone to
--- a pile of resolutions the code never honoured. The status alone makes that
-visible; the date makes it *age in public*, which is the version that gets acted
-on.
+It is also the more consistent application of our own principle. We adopted
+living documents because forcing a reader to reconstruct state from git is the
+failure we were trying to escape, and then put state transitions in exactly that
+place. The gap between `Accepted` and `Implemented` is the hot-air metric a
+decisions directory most needs: a decision the code never honoured shows up as a
+row that never arrived, visible in the file rather than derivable from
+`git log`.
 
 ## Editing versus superseding
 
@@ -246,8 +251,18 @@ the context. A record is frequently read from a local checkout at a commit --
 especially in this repository, where the reason to check out is to run the
 experiments a record cites -- and there it must speak for itself.
 
-**An explicit `Implemented` status.** Rejected as noise, on the argument above,
-with the ambiguity cost accepted and mitigated by the transition rule.
+**A single `Status` line with no marker for the implemented state.** Our own
+first design, superseded within the same pull request by the transition log. The
+argument for it is in *The status field* above; what it could not do was
+distinguish a finished record from a forgotten one, and it kept state
+transitions in git after we had just finished arguing that git is where state
+goes to be ignored.
+
+**A plain `## History` section at the bottom of the record** rather than a
+collapsed block at the top. Rejected because it puts the current state at the
+opposite end of the document from where a reader starts, and duplicates it
+between a top-line status and a bottom-row log. The collapsed block keeps one
+source of truth and puts it first.
 
 ## Consequences
 
