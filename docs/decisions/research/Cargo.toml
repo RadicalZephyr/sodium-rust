@@ -2,6 +2,10 @@
 name = "adr-research"
 version = "0.0.0"
 edition = "2021"
+# Matches the repository's root LICENSE, which already covers this directory.
+# Stated explicitly so tooling that reads package metadata rather than the
+# LICENSE file sees it too; `publish = false` does not imply a license.
+license = "BSD-3-Clause"
 # Nothing here is part of the published crate; it exists so the numbers quoted
 # in an ADR can be re-derived instead of taken on trust.
 publish = false
