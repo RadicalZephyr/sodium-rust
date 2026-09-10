@@ -178,23 +178,40 @@ rewritten. Where discussion surfaced a conflict or a trade-off, write it into
 the section it belongs to. See [`docs/adr/README.md`](docs/adr/README.md).
 
 **Any code that produces concrete data used in the argumentation of an ADR must
-live in the `adr-research` workspace crate at
-[`docs/adr/research/`](docs/adr/research/)**, as a binary named after the ADR it
-serves (`src/bin/0001-some-decision.rs`, run with
-`cargo run --release -p adr-research --bin 0001-some-decision`). A number quoted
-in an ADR has to be re-derivable from a checkout; an experiment that only ever
-existed in a scratch buffer makes the ADR an assertion rather than an argument.
-Dependencies added there land in the `cargo-deny` graph like any other, so they
-must be license-compatible with BSD-3-Clause.
+be committed somewhere a reader can run it** — a number quoted in an ADR has to
+be re-derivable from a checkout, or the record is asserting rather than arguing.
+Which of two homes depends on what the experiment needs:
+
+- **Needs `sodium-rust`** → a binary in the `adr-research` workspace crate at
+  [`docs/adr/research/`](docs/adr/research/), named after the record
+  (`src/bin/0001-some-decision.rs`, run with `cargo run --release -p
+  adr-research --bin 0001-some-decision`). Dependencies added there land in the
+  `cargo-deny` graph, so they must be license-compatible with BSD-3-Clause.
+- **Needs only rustc and std** → a Rust Playground share link recorded in the
+  ADR. This is also the only route for a compile-time experiment: a case that
+  must *fail* to compile cannot be a research binary, because a binary that does
+  not compile breaks the workspace build.
+
+A Playground record carries three things: the link (live convenience), the
+source in a code block (the frozen record — what the ADR argued from), and **the
+rustc version the quoted output came from**. That version stamp is required and
+is checked in review. `version=stable` in a share link is a channel, not a
+version, so the link drifts; without the stamp a reader cannot tell whether
+rustc moved or the record was wrong.
 
 An experiment is maintained while its ADR is a draft. Once the record is
-accepted and the change it argued for has landed, a binary that no longer
-compiles against the new internals is **deleted, not repaired** — the ADR cites
-the commit that produced its numbers, so history keeps the experiment. Do not
-fix up a research binary that `cargo test --workspace` breaks on without first
-checking whether its ADR has already been accepted; most records here argue for
-changing the internals the experiment was measuring, so breaking is the expected
-end of its life rather than a regression.
+accepted and the change has landed it leaves by one of two exits — **deleted**
+(it measured internals the ADR replaced; a binary that no longer compiles is
+deleted, not repaired, and the ADR cites the commit that produced its numbers)
+or **promoted** (it still answers a live question, so it stopped being research:
+a measurement worth re-running moves to `benches/`, a property we promise moves
+to `src/tests.rs`). It never lingers.
+
+So do not fix up a research binary that `cargo test --workspace` breaks on
+without first checking whether its ADR has been accepted; most records here
+argue for changing the internals the experiment was measuring, and breaking is
+the expected end of its life. The crate is a staging area, not an archive, and
+should trend toward empty.
 
 ### Test what is mandated, measure what is chosen
 

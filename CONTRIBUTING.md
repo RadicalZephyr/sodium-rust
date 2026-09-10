@@ -55,12 +55,18 @@ Decisions whose *reasoning* is the valuable part get a record in
 [`docs/adr/`](docs/adr/). See [`docs/adr/README.md`](docs/adr/README.md) for
 the file convention and the draft/accepted lifecycle.
 
-Code that produces concrete data used in the argumentation of an ADR must live
-in the `adr-research` workspace crate at
-[`docs/adr/research/`](docs/adr/research/), as a binary named after the record
-it serves. A number quoted in an ADR has to be re-derivable from a checkout;
-an experiment that only ever existed in a scratch buffer makes the ADR an
-assertion rather than an argument.
+Code that produces concrete data used in the argumentation of an ADR has to be
+committed somewhere a reader can run it -- a number quoted in an ADR has to be
+re-derivable from a checkout, or the record is asserting rather than arguing.
+An experiment needing `sodium-rust` goes in the `adr-research` workspace crate
+at [`docs/adr/research/`](docs/adr/research/) as a binary named after the
+record; one needing only rustc and std goes in a Rust Playground share link
+recorded in the ADR.
+
+**Reviewing an ADR includes checking the version stamp.** A Playground link
+re-runs against whatever stable is current when it is clicked, so any rustc
+output quoted in a record has to say which version produced it. A record
+without that stamp cannot be checked later and should not be approved.
 
 ## Tests and research are not the same thing
 

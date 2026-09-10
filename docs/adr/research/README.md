@@ -43,13 +43,31 @@ implementation diverging from Sodium's denotational semantics. That test
 belongs in `src/tests.rs` with the rest of the suite, and it is written to
 fail. See [`CONTRIBUTING.md`](../../../CONTRIBUTING.md#tests-and-research-are-not-the-same-thing).
 
+An experiment that needs nothing from this crate does not belong here either.
+If it depends only on rustc and std -- a probe into inference, a diagnostic
+worth quoting -- it goes in a Rust Playground share link recorded in the ADR
+instead, which is also the only route available to a case that has to *fail* to
+compile. [`../README.md`](../README.md) has the routing rule and the version
+stamp such a record has to carry.
+
 ## Retirement
 
-A research binary is maintained while its ADR is a draft. Once the record is
-accepted and the change it argued for has landed, a binary that no longer
-compiles against the new internals is deleted rather than repaired -- so cite
-the commit that produced the numbers in the ADR itself, and the experiment
-stays recoverable from history.
+An experiment is maintained while its ADR is a draft. Once the record is
+accepted and the change it argued for has landed, the experiment leaves by one
+of two exits:
 
-Most ADRs here argue for changing the internals. Repairing an experiment whose
-conclusion has already been acted on is work in service of nothing.
+- **Deleted** -- it measured internals the ADR replaced. A binary that no
+  longer compiles against the new code is deleted rather than repaired; cite
+  the commit that produced the numbers in the ADR and history keeps it. Most
+  records here argue for changing the internals an experiment was measuring, so
+  breaking is how it ends rather than a regression.
+- **Promoted** -- it still answers a live question, which means it stopped
+  being research. A measurement worth re-running is a benchmark and moves to
+  `benches/`; something asserting a property we promise is a test and moves to
+  `src/tests.rs`.
+
+What an experiment never does is linger. This crate is a **staging area, not an
+archive**: everything in it has a scheduled exit, and a healthy crate trends
+toward empty. Accumulation is the signal to look for something miscategorised
+-- a benchmark that was never promoted, or an experiment whose ADR quietly
+landed months ago.
