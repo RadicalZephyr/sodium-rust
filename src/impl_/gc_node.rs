@@ -4,7 +4,7 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use std::cell::Cell;
 use std::collections::HashSet;
-use std::fmt::Write as _;
+use std::fmt;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
@@ -123,7 +123,7 @@ impl GcCtx {
         trace!("start: mark_roots");
         let mut old_roots: Vec<GcNode> = Vec::new();
         self.with_data(|data: &mut GcCtxData| std::mem::swap(&mut old_roots, &mut data.roots));
-        self.display_graph(&old_roots);
+        trace!("{}", GraphDump(&old_roots));
         let mut new_roots: Vec<GcNode> = Vec::new();
         for root in &old_roots {
             self.reset_ref_count_adj_step_1_of_2(root);
@@ -148,53 +148,6 @@ impl GcCtx {
         }
         self.with_data(|data: &mut GcCtxData| std::mem::swap(&mut new_roots, &mut data.roots));
         trace!("end: mark_roots");
-    }
-
-    fn display_graph(&self, roots: &[GcNode]) {
-        let mut stack = Vec::new();
-        let mut visited: HashSet<*const GcNodeData> = HashSet::new();
-        let mut show_names_for = Vec::new();
-        for root in roots {
-            stack.push(root.clone());
-        }
-        trace!("-- start of graph drawing --");
-        loop {
-            let next_op = stack.pop();
-            if next_op.is_none() {
-                break;
-            }
-            let next = next_op.unwrap();
-            {
-                let next_ptr: &GcNodeData = &next.data;
-                let next_ptr: *const GcNodeData = next_ptr;
-                if visited.contains(&next_ptr) {
-                    continue;
-                }
-                visited.insert(next_ptr);
-            }
-            let mut line: String = format!(
-                "id {}, ref_count {}: ",
-                next.id,
-                next.data.ref_count.load(Ordering::SeqCst)
-            );
-            let mut first: bool = true;
-            next.trace(|t| {
-                if first {
-                    first = false;
-                } else {
-                    line.push(',');
-                }
-                write!(line, "{}", t.id).ok();
-                stack.push(t.clone());
-            });
-            show_names_for.push(next);
-            trace!("{}", line);
-        }
-        trace!("node names:");
-        for next in show_names_for {
-            trace!("{}: {}", next.id, next.name);
-        }
-        trace!("-- end of graph drawing --");
     }
 
     fn mark_gray(&self, s: &GcNode) {
@@ -441,5 +394,63 @@ impl GcNode {
     pub fn trace<TRACER: FnMut(&GcNode)>(&self, mut tracer: TRACER) {
         let trace = self.data.trace.read();
         trace(&mut tracer);
+    }
+}
+
+/// The GC graph, rendered only if a logger is actually going to read it.
+///
+/// This walk used to run unconditionally inside `mark_roots`, visiting every
+/// reachable node and building a `String` per node before handing the result
+/// to `trace!` — which discarded all of it whenever trace was off. That is
+/// O(reachable graph) on every collection, so it charged every node in a
+/// context to every event, whether or not the node fired.
+///
+/// Wrapping the walk in a `Display` moves it inside the `trace!` macro's own
+/// level check. When trace is disabled `fmt` is never called, so the traversal
+/// costs nothing; when it is enabled the walk writes straight into the
+/// formatter and allocates no per-node `String`. A binary that wants it gone
+/// at compile time can set one of `log`'s `release_max_level_*` features,
+/// which folds the check to a constant.
+struct GraphDump<'a>(&'a [GcNode]);
+
+impl fmt::Display for GraphDump<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut stack: Vec<GcNode> = self.0.to_vec();
+        let mut visited: HashSet<*const GcNodeData> = HashSet::new();
+        let mut show_names_for: Vec<GcNode> = Vec::new();
+        writeln!(f, "-- start of graph drawing --")?;
+        while let Some(next) = stack.pop() {
+            {
+                let next_ptr: &GcNodeData = &next.data;
+                let next_ptr: *const GcNodeData = next_ptr;
+                if !visited.insert(next_ptr) {
+                    continue;
+                }
+            }
+            write!(
+                f,
+                "id {}, ref_count {}: ",
+                next.id,
+                next.data.ref_count.load(Ordering::SeqCst)
+            )?;
+            let mut first = true;
+            let mut res = Ok(());
+            next.trace(|t| {
+                if !first {
+                    res = res.and(write!(f, ","));
+                }
+                first = false;
+                res = res.and(write!(f, "{}", t.id));
+                stack.push(t.clone());
+            });
+            res?;
+            writeln!(f)?;
+            show_names_for.push(next);
+        }
+        writeln!(f, "node names:")?;
+        for next in show_names_for {
+            writeln!(f, "{}: {}", next.id, next.name)?;
+        }
+        write!(f, "-- end of graph drawing --")
     }
 }

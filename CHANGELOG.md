@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The cycle collector no longer walks and formats the whole graph on every
+  collection when trace logging is off. `GcCtx::mark_roots` called
+  `display_graph` unconditionally, which visits every reachable node, hashes
+  each node pointer and builds a `String` per node before handing the result to
+  `trace!`, which discarded it. The walk is now a `Display` gated by the
+  `trace!` macro's own level check, so it costs nothing unless a logger is
+  listening. Measured on `sink -> map -> listen`: 31.7% fewer instructions over
+  a 2000-event run, 5 fewer allocations per send, and 15-18% off wall clock.
+
 ### Added
 
 - New `filter_map` combinator.

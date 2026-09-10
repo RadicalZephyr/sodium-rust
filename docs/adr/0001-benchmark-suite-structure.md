@@ -78,11 +78,37 @@ Some things I measured that the design leans on:
   10 000 instructions per event. A node merely existing in the same context
   costs about 61 — measured by sweeping an unfired side-graph from 0 to 200
   nodes, which moved a 64-event body from 1 585 052 to 2 362 580 instructions,
-  linearly. Wall clock could not see this at all: the same sweep looked flat at
-  ~7.8 µs, because 61 instructions per node is buried in timing noise. That is
-  a useful demonstration of why tier 1 uses callgrind. Allocation counts miss it
-  too, and for a better reason — an idle node costs no allocations at all, only
-  instructions.
+  linearly.
+
+  Two corrections to that, both from re-running the sweep while writing the
+  section below, and both of which change what it argues for.
+
+  About 70% of the 61 was `display_graph` (see below), which walks every
+  reachable node on every collection. With that walk made lazy the same sweep
+  runs 1 077 938 to 1 313 860, or 18.4 instructions per idle node per event.
+  The shape of the finding survives — idle nodes are cheap but not free, and
+  the cost is linear in how many there are — but the constant is a third of
+  what is quoted above, and most of what was being measured was a logging bug
+  rather than the collector.
+
+  It is also load-bearing that the sweep only scales for *some* graph shapes. A
+  side-graph that is not reachable from the root set the collector walks costs
+  nothing at all: an otherwise identical rig, differing only in that its two
+  subgraphs are rooted separately, measures 1 582 341 / 1 584 930 / 1 563 931 /
+  1 585 109 across the same 0 / 8 / 64 / 200 sweep — flat, with the 64-node arm
+  the cheapest of the four. Whether an idle node costs 18 instructions or 0
+  depends on reachability from the GC roots, which is not visible anywhere in
+  the benchmark's source. Tier 2 arms therefore have to pin their root-set
+  shape, not just their node count; see the requirement below.
+
+  Wall clock could not see any of this, and not because of noise. On the
+  *scaling* shape, sweeping 0 to 200 idle nodes moves the instruction count by
+  22% and the wall clock by nothing at all: 6 306 / 6 283 / 7 046 / 6 533 /
+  6 204 ns per event across 0 / 1 / 8 / 64 / 200, with the 200-node arm the
+  fastest measured. These are real instructions that cost no time — a
+  predictable walk over a linear chain that the machine absorbs. Allocation
+  counts agree with the clock rather than with callgrind, and for the reason
+  the next requirement gives: an idle node costs no allocations at all.
 
   It is also what makes the degradation above so violent. The dead nodes there
   are not idle bystanders — they hang off the sink being fired, so they are on
@@ -219,6 +245,84 @@ creates (`sodium-rust` dev-depends on `bench-support`, which depends on
 `sodium-rust`); I verified this, and `cargo check -p sodium-rust`, which is what
 the MSRV job runs, does not build it.
 
+### What the suite has to measure to make a node cheaper
+
+The tiers above are built to answer "did this change make `map` slower". The
+other question we need them for is "what is a node spending its budget on", and
+that is a different instrument.
+
+[Issue #18](https://github.com/RadicalZephyr/sodium-rust/issues/18) asks whether
+to redesign Sodium so the compiler can fuse chains of combinators into single
+nodes. There are two ways to answer it — make a node disappear, or make a node
+cheap — and the second has more headroom than I expected. Fusion is bounded by
+what it is legal to fuse: only where the upstream node has exactly one consumer,
+which excludes every shared node, and in the applications I have written sharing
+is the rule. Slimming is bounded only by how much of a node's cost is essential.
+
+Very little of it is:
+
+| | ns/event | instructions/event |
+|---|---|---|
+| `sink -> listen`, no combinator at all | 4 470 | ~15 000 |
+| each additional `map` on the firing path | ~2 900 | ~10 000 |
+
+A `map` node runs one closure over a `u16`. Against 10 000 instructions the
+closure does not appear. `callgrind_annotate` on `sink -> map -> listen` says
+where the rest goes: allocator ~27%, `core::fmt` ~9%, cycle collection ~7%,
+SipHash ~4%, and lock and atomic traffic inside the node update closure ~7%.
+
+`core::fmt` should not be there, because nothing in that graph formats
+anything. `GcCtx::mark_roots` called `display_graph` unconditionally: it walks
+every reachable node, hashes each node pointer into a `HashSet`, builds a
+`String` per node and a `write!` per edge, and hands the result to `trace!`,
+which throws all of it away whenever trace is off. Making the walk lazy — a
+`Display` newtype passed to a single `trace!`, so the macro's own level check
+gates the traversal — costs 31.7% of the instructions of a 2 000-event run
+(49 867 025 to 34 065 411), 5 allocations off every send, and 15–18% of wall
+clock at every graph shape measured. It is also why the idle-node constant
+above was wrong by 3.4x.
+
+`benches/sodium.rs` ran for two years without seeing that, and could not have:
+a uniform tax on every arm changes no comparison between arms. Neither would a
+suite built only to compare arms against their own history — the tax was there
+when the first baseline was taken. Four requirements follow, and only the last
+is already in the tiers above.
+
+**The floor is a tracked number, not a subtraction baseline.** `sink -> listen`
+costs 4 470 ns before any combinator exists — 62% of a one-`map` event. No
+amount of per-node slimming touches it, and nothing in the four tiers names it
+as a quantity to drive down. The `n0` arm is not only there to interpret the
+others; it is the single largest line item for small graphs.
+
+**Attribution is a stored artifact, not an ad-hoc profiling session.** Every
+finding in this section came from `callgrind_annotate`, not from any count the
+suite would have recorded. A count tells us an arm moved; only a profile says
+which of `malloc`, the collector, the locks or the hasher it moved in. Tier 1
+should commit a function-level breakdown for one canonical arm alongside its
+instruction count, so "where does a node's budget go" has a stored answer that
+moves when the code moves, and so a 4% regression arrives with a first guess
+attached.
+
+**Allocations rank opportunities; instructions only detect change.** These two
+instruments came apart in both directions here, and the pattern is consistent.
+Removing `display_graph` took 5 allocations off each send and moved instructions
+and wall clock together. Adding 200 idle nodes adds no allocations, moves
+instructions by 22%, and moves wall clock by nothing. For a reduction programme
+the allocation count is the honest proxy for time and the instruction count is
+not — which inverts the usual reading of tier 1 versus tier 4. Tier 1 is the
+better *regression* detector, because its numbers are deterministic. Tier 4 is
+the better *optimisation target*, because its numbers correspond to something
+the machine actually charges for. Tier 4 should therefore assert allocations per
+event per call site, not only per event: the programme is a sequence of "which
+of these 27 allocations can go", and a total that moves 27 to 22 says only that
+something did.
+
+**Arms must pin their root-set shape.** Two rigs that differ only in how their
+subgraphs are rooted gave 60.7 and ~0 instructions per idle node per event, with
+identical node counts and identical benchmark source at a glance. `bench-support`
+scenario builders should assert the root-set they construct, the way tier 4
+asserts node counts, or arms will silently measure different graphs.
+
 ## Consequences
 
 - CI grows a Linux-only benchmark job that installs valgrind. It is the second
@@ -232,6 +336,11 @@ the MSRV job runs, does not build it.
   needs saying out loud, or someone will chase a phantom.
 - Callgrind baselines are machine-specific. They must be regenerated when the
   runner image changes, and they cannot be compared across architectures.
+- Every instruction count in this ADR predates the `display_graph` fix and is
+  about 32% high. They are left as measured, because the argument above is
+  partly about how they were wrong; the first real baselines must be taken
+  after that change lands, not before, or the fix will read as the largest
+  improvement the suite ever records and mask everything shipped alongside it.
 - Tier 4 will fail the moment anyone changes an allocation count, including
   deliberately. That is the point, but it means a performance change comes with
   an expected-value update in the same commit, and reviewers need to read those
@@ -279,3 +388,11 @@ long-lived contexts require it regardless.
 - The `*_with_deps` variants double the ledger's size. Do they warrant their
   own entries, or is one representative pair enough to prove the dependency
   threading costs nothing extra?
+- If instruction counts and wall clock disagree as sharply as the idle-node
+  sweep says they can, is tier 1 gating the right idea at all? A change that
+  removes 20% of the instructions and none of the time would pass a gate and
+  buy nothing. I still want tier 1 for its determinism, but the gate may belong
+  on tier 4's allocation counts instead.
+- What is the floor made of? 4 470 ns for `sink -> listen` is the largest single
+  cost in a small graph and I have not decomposed it. Batching eight sends into
+  one transaction saves only 4%, so it is not transaction open and close.
