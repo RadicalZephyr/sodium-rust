@@ -65,9 +65,16 @@ within one run, not across runs.
    be misleading, say that too and leave it in place.
 
 That last point is not a formality. `src/bin/adr0001_cost_model.rs` reports
-that nodes off the firing path cost nothing, and it is wrong: they cost about
-61 instructions each per event, which
-`benches/adr0001_instruction_counts.rs` measures and a timing loop cannot. The
-experiment that gives the confident wrong answer is worth keeping next to the
-one that corrects it, because the reason it was wrong is the reason the
-benchmark suite is built the way it is.
+that nodes off the firing path cost nothing, and on a clock that is true;
+`benches/adr0001_instruction_counts.rs` measures the same shape at 18.4
+instructions per idle node per event, and that is true too. Keeping both is
+what makes the disagreement legible, and the disagreement is the reason the
+benchmark suite is built the way it is: instruction counts resolve things a
+timing loop cannot, and some of what they resolve costs no time.
+
+Experiments here also have to say what they hold and what they release.
+`adr0001_root_set.rs` exists because two rigs with identical graphs, node
+counts and listeners measured 0 and 18.4 instructions per idle node depending
+only on whether their intermediate `Stream` handles were still alive. Handle
+lifetime is not visible in a benchmark's shape, so each file states its
+choice.

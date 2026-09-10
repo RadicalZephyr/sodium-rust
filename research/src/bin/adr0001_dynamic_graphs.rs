@@ -30,37 +30,37 @@
 //! ```text
 //! 1. switch_s flip cost against the graph DOWNSTREAM of the switch
 //! downstream maps                            allocs/flip         ns/flip
-//! 0                                                 68.0           15267
-//! 1                                                 68.0           15069
-//! 4                                                 68.0           15294
-//! 16                                                68.0           15061
-//! 64                                                68.0           15364
+//! 0                                                 54.0           12583
+//! 1                                                 54.0           12591
+//! 4                                                 54.0           12455
+//! 16                                                54.0           12805
+//! 64                                                54.0           12557
 //!
 //! 2. switch_s flip cost against the branch being switched IN
 //! upstream maps                              allocs/flip         ns/flip
-//! 0                                                 68.0           15067
-//! 1                                                 72.0           17411
-//! 4                                                 79.0           23049
-//! 16                                               107.0           46216
-//! 64                                               209.0          138333
+//! 0                                                 54.0           12721
+//! 1                                                 54.0           13797
+//! 4                                                 54.0           17731
+//! 16                                                54.0           32385
+//! 64                                                54.0           92567
 //!
 //! 3a. A long-lived context, subgraphs released with drop(listener)
 //! state                                       node_count     allocs/send         ns/send
-//! fresh                                                2            27.0            4869
-//! after 100 cycles                                   202          2558.3          509119
-//! after 300 cycles                                   602          7567.3         1616148
-//! after 800 cycles                                  1602         20073.3         4485951
-//! + collect_cycles()                                1602         20073.2         4459554
-//! + two more collects                               1602         20073.2         4481106
+//! fresh                                                2            22.0            3743
+//! after 100 cycles                                   202          2335.2          458358
+//! after 300 cycles                                   602          6938.3         1368871
+//! after 800 cycles                                  1602         18441.3         3691062
+//! + collect_cycles()                                1602         18441.2         3713318
+//! + two more collects                               1602         18441.2         3688056
 //!
 //! 3b. The same, released with listener.unlisten()
 //! state                                       node_count     allocs/send         ns/send
-//! fresh                                                2            27.0            5174
-//! after 100 cycles                                     2           127.2           17843
-//! after 300 cycles                                     2           327.2           45354
-//! after 800 cycles                                     2           827.2          117505
-//! + collect_cycles()                                   2           827.0          116241
-//! + two more collects                                  2           827.0          112347
+//! fresh                                                2            22.0            3764
+//! after 100 cycles                                     2           122.1           17360
+//! after 300 cycles                                     2           322.1           44188
+//! after 800 cycles                                     2           822.1          113631
+//! + collect_cycles()                                   2           822.0          112802
+//! + two more collects                                  2           822.0          112767
 //! ```
 
 use std::hint::black_box;

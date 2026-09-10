@@ -26,9 +26,9 @@ the whole graph is rebuilt inside every `b.iter()` body:
 
 | maps | whole (µs) | construct only (µs) | construct % |
 |---|---|---|---|
-| 0 | 4647.8 | 6.6 | 0.1% |
-| 1 | 7822.5 | 12.5 | 0.2% |
-| 8 | 29406.9 | 79.9 | 0.3% |
+| 0 | 4012.8 | 6.2 | 0.2% |
+| 1 | 6748.7 | 10.8 | 0.2% |
+| 8 | 25602.7 | 66.7 | 0.3% |
 
 Construction is noise. The benches really are measuring propagation.
 
@@ -40,15 +40,15 @@ Build a one-node subgraph on a live context, release it, and repeat:
 
 | after N release cycles | `node_count` | allocs per send | ns per send |
 |---|---|---|---|
-| 0 | 2 | 27.0 | 4 755 |
-| 100, released with `drop` | 202 | 2 558.3 | 544 267 |
-| 300, released with `drop` | 602 | 7 567.3 | 1 621 685 |
-| 800, released with `drop` | 1602 | 20 073.3 | 5 032 694 |
-| 800, then `collect_cycles()` | 1602 | 20 073.2 | 4 486 103 |
-| 100, released with `unlisten()` | 2 | 127.2 | 18 238 |
-| 300, released with `unlisten()` | 2 | 327.2 | 45 616 |
-| 800, released with `unlisten()` | 2 | 827.2 | 116 029 |
-| 800, `unlisten()` then `collect_cycles()` | 2 | 827.0 | 114 508 |
+| 0 | 2 | 22.0 | 3 743 |
+| 100, released with `drop` | 202 | 2 335.2 | 458 358 |
+| 300, released with `drop` | 602 | 6 938.3 | 1 368 871 |
+| 800, released with `drop` | 1602 | 18 441.3 | 3 691 062 |
+| 800, then `collect_cycles()` | 1602 | 18 441.2 | 3 713 318 |
+| 100, released with `unlisten()` | 2 | 122.1 | 17 360 |
+| 300, released with `unlisten()` | 2 | 322.1 | 44 188 |
+| 800, released with `unlisten()` | 2 | 822.1 | 113 631 |
+| 800, `unlisten()` then `collect_cycles()` | 2 | 822.0 | 112 802 |
 
 Both halves of that table grow linearly and without bound, and they are not the
 same problem. Dropping a `Listener` without calling `unlisten()` retains its
@@ -73,91 +73,74 @@ last Tuesday.
 
 Some things I measured that the design leans on:
 
-- **Cost is dominated by the nodes on the firing path; nodes elsewhere in the
-  context are cheap but not free.** A node on the firing path costs roughly
-  10 000 instructions per event. A node merely existing in the same context
-  costs about 61 — measured by sweeping an unfired side-graph from 0 to 200
-  nodes, which moved a 64-event body from 1 585 052 to 2 362 580 instructions,
-  linearly.
+- **Cost is dominated by the nodes on the firing path. What a node off the
+  firing path costs depends on whether its handles were dropped.** A node on
+  the firing path costs 6 100 to 7 900 instructions per event. A node merely
+  existing in the same context costs either 18.4 instructions per event or
+  nothing, and the deciding variable is not one the benchmark's source makes
+  visible.
 
-  Two corrections to that, both from re-running the sweep while writing the
-  section below, and both of which change what it argues for.
+  Dropping a `Stream` handle decrements a `GcNode` refcount, which files that
+  node as a candidate cycle root; `collect_cycles` runs at the end of every
+  transaction and walks the graph reachable from those roots. So a graph that
+  has released its intermediate handles pays for its idle nodes on every event,
+  and an otherwise identical graph still holding them pays nothing:
 
-  About 70% of the 61 was `display_graph` (see below), which walks every
-  reachable node on every collection. With that walk made lazy the same sweep
-  runs 1 077 938 to 1 313 860, or 18.4 instructions per idle node per event.
-  The shape of the finding survives — idle nodes are cheap but not free, and
-  the cost is linear in how many there are — but the constant is a third of
-  what is quoted above, and most of what was being measured was a logging bug
-  rather than the collector.
+  | idle nodes on a second, never-fired sink | 0 | 8 | 64 | 200 | per node per event |
+  |---|---|---|---|---|---|
+  | handles held | 1 063 741 | 1 063 741 | 1 057 784 | 1 065 508 | 0 |
+  | handles dropped | 1 078 499 | 1 088 611 | 1 142 517 | 1 314 421 | 18.4 |
 
-  It is also load-bearing that the sweep only scales for *some* graph shapes. A
-  side-graph that is not reachable from the root set the collector walks costs
-  nothing at all: an otherwise identical rig, differing only in that its two
-  subgraphs are rooted separately, measures 1 582 341 / 1 584 930 / 1 563 931 /
-  1 585 109 across the same 0 / 8 / 64 / 200 sweep — flat, with the 64-node arm
-  the cheapest of the four. Whether an idle node costs 18 instructions or 0
-  depends on reachability from the GC roots, which is not visible anywhere in
-  the benchmark's source. Tier 2 arms therefore have to pin their root-set
-  shape, not just their node count; see the requirement below.
+  Same nodes, same listeners, same sinks, same 64 sends. Application code drops
+  its handles — you write `sink.stream().map(f).listen(g)` and keep only the
+  `Listener` — so the dropped arm is the one that describes a real program.
 
-  Wall clock could not see any of this, and not because of noise. On the
-  *scaling* shape, sweeping 0 to 200 idle nodes moves the instruction count by
-  22% and the wall clock by nothing at all: 6 306 / 6 283 / 7 046 / 6 533 /
-  6 204 ns per event across 0 / 1 / 8 / 64 / 200, with the 200-node arm the
-  fastest measured. These are real instructions that cost no time — a
-  predictable walk over a linear chain that the machine absorbs. Allocation
-  counts agree with the clock rather than with callgrind, and for the reason
-  the next requirement gives: an idle node costs no allocations at all.
+  Wall clock resolves neither arm: the same sweep on a timing loop is flat to
+  within noise in both, and allocation counts are exactly 36 per send at every
+  point in both. Instructions are the only instrument that sees this at all,
+  which is most of the argument for tier 1, and the reason tier 2 arms have to
+  pin handle lifetime the way tier 4 pins node counts.
 
-  It is also what makes the degradation above so violent. The dead nodes there
-  are not idle bystanders — they hang off the sink being fired, so they are on
-  the firing path, at 10 000 instructions each rather than 61.
+  Allocator state is not the explanation. The control — padding the context with
+  live heap blocks instead of live nodes — returns bit-identical counts at 0, 64
+  and 200 blocks, against the 22% that 200 dropped-handle nodes add.
 
-  Two arms differing by one node therefore differ by that node's firing cost
-  plus its global cost, which is the number we want, as long as the arms are
-  otherwise identical. Heap state is not the explanation: padding the context
-  with 5000 live heap blocks instead of nodes moves the same body by 1.2%, in
-  the *opposite* direction, against the 49% that 200 idle nodes add.
-- **Transaction overhead does not dominate fine-grained sends; coalescing does.**
-  The measurement this bullet used to report — 2000 sends through
-  `sink -> map -> listen` at 43 allocations each, versus 1 each inside one
-  `ctx.transaction()` — cannot support the conclusion I drew from it. The
-  batched arm sends 2000 times into *one* sink, and `Stream::_send` with no
-  coalescer sets `data.firing_op = Some(a)`, so the last write wins and 1999 of
-  those sends never propagate at all. `adr0001_timed_region.rs` says so in a
-  comment. The arm therefore removed 1999 propagations along with 1999
-  transactions, and attributing the whole difference to transaction machinery
-  is wrong.
-
-  Measured so the two are separable — an empty `ctx.transaction(|| {})`, then a
-  sweep of how many *distinct* sinks fire inside one transaction — the split is
-  close to the opposite of what was claimed:
+- **Transaction machinery costs essentially nothing; propagation is the whole
+  of a send.** `SodiumCtx::transaction` is a depth counter, and `send` only
+  sets the stream's `firing_op` and queues the node. Everything happens in
+  `end_of_transaction`, which closes the transaction *and* runs the
+  `changed_nodes` loop *and* drains three callback queues *and* calls
+  `collect_cycles`. Because close and propagate are one function, the cost of
+  closing cannot be got at by comparing one transaction against many — those
+  arms differ in how much they propagate too. Measuring an empty transaction
+  does get at it:
 
   | | allocations | ns |
   |---|---|---|
-  | empty transaction, bare context | 0 | 270 |
-  | empty transaction, live subgraphs on the context | 0 | 272 |
-  | one bare send, `sink -> map -> listen` | 36 | 6 366 |
-  | marginal per additional firing sink in one transaction | 32–33 | ~6 100 |
+  | empty transaction, bare context | 0 | 289 |
+  | empty transaction, 8 live subgraphs on the context | 0 | 292 |
+  | one distinct sink fired, `sink -> map -> listen` | 36 | 6 930 |
+  | marginal per additional distinct sink in one transaction | ~32 | ~6 500 |
 
-  A transaction with nothing to propagate allocates nothing and costs 270 ns,
-  flat in the size of the graph — `end_of_transaction` drains three empty
-  queues and runs `collect_cycles()` over an empty root set. Essentially all of
-  a send's cost is propagation. (These are post-`display_graph` numbers on a
-  context carrying several subgraphs, so they are not directly comparable to
-  the 27 and 43 quoted elsewhere; the ratio is the point, and the zero is
-  unambiguous.)
+  A transaction with nothing to propagate allocates nothing and is flat in the
+  size of the graph. There is no per-transaction overhead worth amortising.
 
-  This matters beyond the ledger, because the discarded reading is advice.
-  "Batch your sends into a transaction to amortise the overhead" is wrong twice
-  over: there is almost no per-transaction overhead to amortise, and batching
-  repeated sends to one sink silently drops all but the last. A transaction is
-  a statement that events were simultaneous, not a buffering optimisation.
-- **`switch_s` reconfiguration costs O(the branch switched in)**, not
-  O(downstream) and not O(graph). Growing the downstream graph from 0 to 64
-  nodes leaves a flip at 68 allocations flat; growing the *upstream* branch
-  over the same range takes it from 68 to 209.
+  The arms must fire *distinct* sinks. `Stream::_send` with no coalescer sets
+  `data.firing_op = Some(a)`, so a second `send` to the same sink inside one
+  transaction overwrites the first and it never propagates: sending 1, 2 and 3
+  into one plain `StreamSink` in one transaction delivers `[3]`, with no panic
+  and no diagnostic. Sweeping *sends per transaction* on a single sink
+  therefore measures coalescing and would report the transaction as nearly free
+  for entirely the wrong reason. The silent drop is tracked as issue #42; the
+  advice it invites — "batch your sends into a transaction to amortise the
+  overhead" — is wrong twice over, since there is no overhead to amortise and
+  the batching destroys events.
+
+- **`switch_s` reconfiguration costs O(the branch switched in) in time**, not
+  O(downstream) and not O(graph), and is flat in allocations either way. A flip
+  costs 54 allocations whichever side grows. Growing the downstream graph from
+  0 to 64 nodes leaves it at ~12.6 µs flat; growing the *upstream* branch over
+  the same range takes it from 12.7 µs to 92.6 µs.
 - **Allocation counts are exactly reproducible.** Repeated runs of a
   twenty-shape ledger return byte-identical integers; only the timing column
   moves.
@@ -201,12 +184,12 @@ That distinction matters, because the marginal cost of a node is not uniform:
 
 | chain length | instructions (64 sends) | marginal instr/node/send |
 |---|---|---|
-| 0 | 934 752 | — |
-| 1 | 1 581 675 | 10 108 |
-| 2 | 2 196 345 | 9 604 |
-| 3 | 3 083 678 | 13 865 |
-| 4 | 3 751 946 | 10 442 |
-| 8 | 6 728 919 | 11 608 |
+| 0 | 630 176 | — |
+| 1 | 1 076 165 | 6 969 |
+| 2 | 1 468 995 | 6 138 |
+| 3 | 1 947 190 | 7 472 |
+| 4 | 2 358 304 | 6 424 |
+| 8 | 4 385 993 | 7 921 |
 
 Those numbers reproduce to within 0.013%, so the spread is structural — what a
 node costs depends on where in the chain it sits. Subtracting arms would
@@ -262,7 +245,7 @@ public, so `node_count()`, `node_ref_count()` and `collect_cycles()` are all
 reachable from an integration test.
 
 These are tests, not benchmarks, because the numbers are exact integers. A
-change from 43 allocations per event to 44 is a hard failure with a diff,
+change from 36 allocations per event to 37 is a hard failure with a diff,
 available on every platform, in every CI run, with no statistics and no
 baseline storage. That is a strictly better instrument than a timing harness
 for the thing it can measure.
@@ -278,81 +261,83 @@ the MSRV job runs, does not build it.
 
 ### What the suite has to measure to make a node cheaper
 
-The tiers above are built to answer "did this change make `map` slower". The
-other question we need them for is "what is a node spending its budget on", and
-that is a different instrument.
+The tiers above answer "did this change make `map` slower". The slimming
+programme needs them to answer "what is a node spending its budget on", which is
+a different instrument.
 
 [Issue #18](https://github.com/RadicalZephyr/sodium-rust/issues/18) asks whether
 to redesign Sodium so the compiler can fuse chains of combinators into single
 nodes. There are two ways to answer it — make a node disappear, or make a node
-cheap — and the second has more headroom than I expected. Fusion is bounded by
-what it is legal to fuse: only where the upstream node has exactly one consumer,
-which excludes every shared node, and in the applications I have written sharing
-is the rule. Slimming is bounded only by how much of a node's cost is essential.
+cheap — and the second has more headroom. Fusion is bounded by what it is legal
+to fuse: only where the upstream node has exactly one consumer, which excludes
+every shared node, and in the applications I have written sharing is the rule.
+Slimming is bounded only by how much of a node's cost is essential.
 
 Very little of it is:
 
-| | ns/event | instructions/event |
-|---|---|---|
-| `sink -> listen`, no combinator at all | 4 470 | ~15 000 |
-| each additional `map` on the firing path | ~2 900 | ~10 000 |
+| | allocations | ns | instructions/event |
+|---|---|---|---|
+| `sink -> listen`, no combinator at all | 22 | ~4 300 | 9 846 |
+| each additional `map` on the firing path | 13–14 | ~2 700 | 6 100–7 900 |
 
-A `map` node runs one closure over a `u16`. Against 10 000 instructions the
-closure does not appear. `callgrind_annotate` on `sink -> map -> listen` says
-where the rest goes: allocator ~27%, `core::fmt` ~9%, cycle collection ~7%,
-SipHash ~4%, and lock and atomic traffic inside the node update closure ~7%.
+A `map` node runs one closure over a `u16`. Against fourteen allocations, none
+of that budget is the user's computation. A profile of `sink -> map -> listen`
+says where it goes: the allocator is ~30% of all instructions, and lock and
+atomic traffic inside the node update closure another ~11%.
 
-`core::fmt` should not be there, because nothing in that graph formats
-anything. `GcCtx::mark_roots` called `display_graph` unconditionally: it walks
-every reachable node, hashes each node pointer into a `HashSet`, builds a
-`String` per node and a `write!` per edge, and hands the result to `trace!`,
-which throws all of it away whenever trace is off. Making the walk lazy — a
-`Display` newtype passed to a single `trace!`, so the macro's own level check
-gates the traversal — costs 31.7% of the instructions of a 2 000-event run
-(49 867 025 to 34 065 411), 5 allocations off every send, and 15–18% of wall
-clock at every graph shape measured. It is also why the idle-node constant
-above was wrong by 3.4x.
+That profile is also how the largest single win so far was found, and the way it
+was found is the argument for this section. `GcCtx::mark_roots` called
+`display_graph` unconditionally — a walk over every reachable node that hashes
+each node pointer into a `HashSet`, builds a `String` per node and a `write!`
+per edge, and hands the result to `trace!`, which discards it whenever trace is
+off. Nothing in that graph formats anything, and yet `core::fmt` was 9% of its
+instructions. Making the walk lazy took 31.7% off a 2 000-event run
+(49 867 025 to 34 045 397 instructions), five to seven allocations off every
+send depending on shape, and 15–18% off wall clock at every graph shape
+measured. It is also most of what the old idle-node and `switch_s` allocation
+figures were measuring.
 
-`benches/sodium.rs` ran for two years without seeing that, and could not have:
-a uniform tax on every arm changes no comparison between arms. Neither would a
-suite built only to compare arms against their own history — the tax was there
-when the first baseline was taken. Four requirements follow, and only the last
-is already in the tiers above.
+Nothing in the four tiers as drafted would have caught it. `benches/sodium.rs`
+ran for two years without seeing it, and could not have: a uniform tax on every
+arm changes no comparison between arms. Neither would tier 1 comparing arms
+against their own history, because the tax was already there when the first
+baseline would have been taken. Four requirements follow, and only the last is
+already implied above.
 
 **The floor is a tracked number, not a subtraction baseline.** `sink -> listen`
-costs 4 470 ns before any combinator exists — 62% of a one-`map` event. No
-amount of per-node slimming touches it, and nothing in the four tiers names it
-as a quantity to drive down. The `n0` arm is not only there to interpret the
-others; it is the single largest line item for small graphs.
+costs 22 allocations and ~4.3 µs before any combinator exists — 63% of a
+one-`map` event. No amount of per-node slimming touches it, and nothing in the
+four tiers names it as a quantity to drive down. The `n0` arm is not only there
+to interpret the others; it is the largest single line item for small graphs.
 
-**Attribution is a stored artifact, not an ad-hoc profiling session.** Every
-finding in this section came from `callgrind_annotate`, not from any count the
-suite would have recorded. A count tells us an arm moved; only a profile says
-which of `malloc`, the collector, the locks or the hasher it moved in. Tier 1
-should commit a function-level breakdown for one canonical arm alongside its
-instruction count, so "where does a node's budget go" has a stored answer that
-moves when the code moves, and so a 4% regression arrives with a first guess
-attached.
+**Attribution is a stored artifact, not an ad-hoc profiling session.** A count
+says an arm moved; only a profile says which of `malloc`, the collector, the
+locks or the hasher it moved in. Tier 1 should commit a function-level
+breakdown for one canonical arm alongside its instruction count, so "where does
+a node's budget go" has a stored answer that moves when the code moves, and so a
+4% regression arrives with a first guess attached.
+`research/src/bin/adr0001_profile_target.rs` is the shape that should be
+promoted into the suite.
 
-**Allocations rank opportunities; instructions only detect change.** These two
-instruments came apart in both directions here, and the pattern is consistent.
-Removing `display_graph` took 5 allocations off each send and moved instructions
-and wall clock together. Adding 200 idle nodes adds no allocations, moves
-instructions by 22%, and moves wall clock by nothing. For a reduction programme
-the allocation count is the honest proxy for time and the instruction count is
-not — which inverts the usual reading of tier 1 versus tier 4. Tier 1 is the
-better *regression* detector, because its numbers are deterministic. Tier 4 is
-the better *optimisation target*, because its numbers correspond to something
-the machine actually charges for. Tier 4 should therefore assert allocations per
-event per call site, not only per event: the programme is a sequence of "which
-of these 27 allocations can go", and a total that moves 27 to 22 says only that
-something did.
+**Allocations rank opportunities; instructions only detect change.** The two
+instruments come apart in both directions, consistently. Removing
+`display_graph` moved allocations, instructions and wall clock together. Adding
+200 idle nodes adds no allocations, moves instructions by 22%, and moves wall
+clock by nothing — those are real instructions that cost no time. So tier 1 is
+the better *regression* detector, because its numbers are deterministic, and
+tier 4 is the better *optimisation target*, because its numbers correspond to
+something the machine charges for. Tier 4 should therefore assert allocations
+per event per call site, not only per event: the programme is a sequence of
+"which of these 22 allocations can go", and a total that moves 27 to 22 says
+only that something did.
 
-**Arms must pin their root-set shape.** Two rigs that differ only in how their
-subgraphs are rooted gave 60.7 and ~0 instructions per idle node per event, with
-identical node counts and identical benchmark source at a glance. `bench-support`
-scenario builders should assert the root-set they construct, the way tier 4
-asserts node counts, or arms will silently measure different graphs.
+**Arms must pin handle lifetime, not just node count.** Two rigs with identical
+graphs, node counts, listeners and sends measured 0 and 18.4 instructions per
+idle node per event, differing only in whether their intermediate `Stream`
+handles were still alive. Nothing in either benchmark's shape shows which it is.
+`bench-support` scenario builders should state and assert what they hold and
+what they release, the way tier 4 asserts node counts, or two arms that read
+identically will measure different graphs.
 
 ## Consequences
 
@@ -367,11 +352,6 @@ asserts node counts, or arms will silently measure different graphs.
   needs saying out loud, or someone will chase a phantom.
 - Callgrind baselines are machine-specific. They must be regenerated when the
   runner image changes, and they cannot be compared across architectures.
-- Every instruction count in this ADR predates the `display_graph` fix and is
-  about 32% high. They are left as measured, because the argument above is
-  partly about how they were wrong; the first real baselines must be taken
-  after that change lands, not before, or the fix will read as the largest
-  improvement the suite ever records and mask everything shipped alongside it.
 - Tier 4 will fail the moment anyone changes an allocation count, including
   deliberately. That is the point, but it means a performance change comes with
   an expected-value update in the same commit, and reviewers need to read those
@@ -425,9 +405,8 @@ long-lived contexts require it regardless.
   buy nothing. I still want tier 1 for its determinism, but the gate may belong
   on tier 4's allocation counts instead.
 - What is the floor made of? Not the transaction: an empty one is 0 allocations
-  and 270 ns, against ~3 400 ns for propagating a single event through the two
-  nodes `sink -> listen` cannot do without. So the floor is node cost too,
-  which means the slimming programme has no separate transaction workstream to
-  open — but it also means nothing here is cheap enough to ignore, and I have
-  not attributed those 3 400 ns any further than the profile in the section
-  above.
+  and ~290 ns, against 22 allocations and ~4.3 µs for one event through the two
+  nodes `sink -> listen` cannot do without. So the floor is node cost too, and
+  the slimming programme has no separate transaction workstream to open. I have
+  not attributed those 22 allocations to call sites, which is the next thing to
+  do and what the third requirement above asks the suite to make routine.

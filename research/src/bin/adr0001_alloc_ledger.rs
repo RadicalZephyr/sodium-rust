@@ -25,34 +25,34 @@
 //! ```text
 //! Stream combinators, one node over the baseline
 //! shape                                     allocs/event           delta        ns/event
-//! sink -> listen                                    27.0        baseline            4552
-//! + map                                             43.0             +16            7487
-//! + map_to                                          43.0             +16            7581
-//! + filter (passes)                                 43.0             +16            7500
-//! + filter (drops)                                  27.0              +0            4500
-//! + filter_map (Some)                               43.0             +16            7458
-//! + once                                            15.0             -12            2499
-//! + merge (one side fires)                          51.0             +24            9108
-//! + or_else (one side fires)                        51.0             +24            8877
-//! + snapshot                                        47.0             +20            9132
-//! + gate (open)                                     47.0             +20            9472
-//! + Operational::defer                              62.0             +35           10190
-//! + accum -> updates                                75.0             +48           13415
-//! + hold -> updates                                 28.0              +1            4697
-//! + collect                                        104.0             +77           19386
+//! sink -> listen                                    22.0        baseline            3930
+//! + map                                             36.0             +14            6631
+//! + map_to                                          36.0             +14            6516
+//! + filter (passes)                                 36.0             +14            6520
+//! + filter (drops)                                  22.0              +0            3882
+//! + filter_map (Some)                               36.0             +14            6571
+//! + once                                            11.0             -11            2100
+//! + merge (one side fires)                          42.0             +20            7923
+//! + or_else (one side fires)                        42.0             +20            8073
+//! + snapshot                                        36.0             +14            7867
+//! + gate (open)                                     36.0             +14            7947
+//! + Operational::defer                              50.0             +28            8734
+//! + accum -> updates                                63.0             +41           11755
+//! + hold -> updates                                 23.0              +1            4006
+//! + collect                                         90.0             +68           16303
 //!
 //! Cell combinators, driven from a CellSink
 //! shape                                     allocs/event           delta        ns/event
-//! cell_sink -> updates                              41.0        baseline            7102
-//! + Cell::map                                       59.0             +18           10319
-//! + lift2                                          109.0             +68           20561
-//! + lift3                                          173.0            +132           33468
-//! + Cell::value                                     83.0             +42           14417
+//! cell_sink -> updates                              35.0        baseline            6243
+//! + Cell::map                                       50.0             +15            9243
+//! + lift2                                           93.0             +58           17678
+//! + lift3                                          150.0            +115           28845
+//! + Cell::value                                     70.0             +35           12523
 //!
 //! Dynamic graph combinators
 //! shape                                     allocs/event           delta        ns/event
-//! switch_s, fire selected stream                    72.0        baseline           12615
-//! switch_c, fire selected cell                      88.0        baseline           15834
+//! switch_s, fire selected stream                    59.0        baseline           11260
+//! switch_c, fire selected cell                      74.0        baseline           13510
 //! ```
 
 use std::hint::black_box;

@@ -7,12 +7,20 @@
 //!
 //! Run with `cargo run --release -p research --bin adr0001_cost_model`.
 //!
-//! **Read the first section with the companion bench.** Wall clock says idle
-//! nodes are free. They are not: `benches/adr0001_instruction_counts.rs`
-//! measures them at about 61 instructions per node per event, which is real but
-//! far below what a timing loop on a shared machine can resolve. This
-//! experiment is kept precisely because it gives the wrong answer confidently,
-//! which is the argument for tier 1 using callgrind.
+//! **Read the first section with the companion bench and with
+//! `adr0001_root_set.rs`.** Section 1 says idle nodes are free. On a clock they
+//! are: `adr0001_root_set.rs` sweeps the same shape and is flat to within noise.
+//! On instructions they are not — `benches/adr0001_instruction_counts.rs`
+//! measures the same shape at 18.4 instructions per idle node per event. Both
+//! readings are correct, and the gap between them is the point: these are real
+//! instructions that cost no measurable time.
+//!
+//! Section 1 binds nothing, passing `chain(..)` straight into `listen` as a
+//! temporary, so its intermediate `Stream` handles are released during wiring.
+//! That is what puts nodes on the collector's candidate-root list in the first
+//! place, and it is what application code does. `adr0001_root_set.rs` holds the
+//! handles instead and the instruction cost goes to zero, so the shape below is
+//! the expensive one, not the cheap one.
 //!
 //! Timings move with machine load; the allocation counts do not. Compare
 //! within a run, not across runs.
@@ -23,26 +31,27 @@
 //! ```text
 //! 1. Fire sink A (1-map chain) while an unrelated chain on sink B grows
 //! B's maps                                 A allocs/send       A ns/send
-//! 0                                                 43.0         10115.5
-//! 1                                                 43.0          8963.9
-//! 4                                                 43.0          7653.1
-//! 16                                                43.0          7447.3
-//! 64                                                43.0          7404.5
-//! 256                                               43.0          7668.7
+//! 0                                                 36.0          6639.0
+//! 1                                                 36.0          6533.2
+//! 4                                                 36.0          6211.4
+//! 16                                                36.0          6231.7
+//! 64                                                36.0          6192.9
+//! 256                                               36.0          6645.6
 //!   (wall clock says flat; the callgrind bench says ~61 instructions per idle node)
+//!   (wall clock says flat; the callgrind bench says 18.4 instructions per idle node)
 //!
 //! 2. 64 map nodes on the firing path, arranged three ways
 //! arrangement                                allocs/send         ns/send
-//! depth 64, 1 listener                             950.0        229134.2
-//! width 64, 64 listeners                          1646.0        349592.3
-//! width 64 + 63 merges, 1 listener                2102.0        459969.5
+//! depth 64, 1 listener                             865.0        185622.7
+//! width 64, 64 listeners                          1496.0        292074.0
+//! width 64 + 63 merges, 1 listener                1938.0        403368.1
 //!
 //! 3. N listeners attached directly to one sink
 //! listeners                                  allocs/send         ns/send
-//! 1                                                 27.0          4508.2
-//! 2                                                 38.0          6584.5
-//! 8                                                114.0         18984.2
-//! 32                                               388.0         71856.0
+//! 1                                                 22.0          3876.6
+//! 2                                                 32.0          5679.8
+//! 8                                                 96.0         16458.6
+//! 32                                               340.0         58761.1
 //! ```
 
 use std::hint::black_box;
