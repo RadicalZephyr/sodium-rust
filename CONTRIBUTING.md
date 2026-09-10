@@ -35,6 +35,12 @@ The `compile_fail` cases under `tests/ui/` carry expected rustc output, which
 is not stable across releases. After a deliberate change to a diagnostic,
 re-bless them with `TRYBUILD=overwrite cargo test --test ui`.
 
+Only after a deliberate change, though. A mismatch you did not cause means your
+toolchain is not the stable these were blessed against -- run `rustup check`
+before reaching for `overwrite`, because blessing on an older rustc commits its
+wording and turns CI red. The diff looks harmless when it happens: the article
+in `expected a`/`expected an` is a real example.
+
 Tests run against stable, beta and nightly, on Linux, macOS and Windows;
 nightly is allowed to fail. The MSRV is whatever `rust-version` in the root
 `Cargo.toml` says, and CI checks it against the library alone.

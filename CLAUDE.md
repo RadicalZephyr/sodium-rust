@@ -39,6 +39,12 @@ not stable across releases. After a deliberate change to a diagnostic:
 TRYBUILD=overwrite cargo test --test ui
 ```
 
+Only after a deliberate change. A mismatch you did not cause means your
+toolchain is not the stable these were blessed against — run `rustup check`
+first. Blessing on an older rustc commits its wording and turns CI red, and the
+diff looks innocuous: the article in `expected a`/`expected an` is a real
+example.
+
 Benchmarks are Criterion, and the causal profiler is a separate workload with
 its own setup — see [`coz-driver/README.md`](coz-driver/README.md):
 
