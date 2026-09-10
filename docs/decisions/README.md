@@ -13,27 +13,102 @@ later.
 ## Files
 
 One record per file, `NNNN-kebab-case-title.md`, numbered from `0001` in the
-order they are written. Numbers are never reused, and a superseded record is
-never deleted -- it gets a `Superseded by NNNN` status and stays where it is.
+order they are written. Numbers are never reused. A number is an identifier, not
+a chronology -- it is what supersession references point at, which is why it
+survives a retitle.
 
-Every ADR opens as a **Draft**. A draft can be edited freely, without recording
-the history of its own revisions; once it is **Accepted** the record is
-effectively frozen, and a change of mind is a new ADR that supersedes it.
+Suggested sections, though the record should follow the argument rather than the
+template:
 
-Suggested sections, though the record should follow the argument rather than
-the template:
-
-- **Status** -- Draft, Accepted, or Superseded by NNNN.
-- **Date** -- YYYY-MM-DD,
+- **Status** -- omitted entirely when the decision is made and built. See below.
+- **Date** -- YYYY-MM-DD, when the record was written.
 - **Context** -- the forces in play, including anything measured.
 - **Decision** -- what we are doing.
 - **Consequences** -- what this buys and what it costs, including the parts we
   are not happy about.
 - **Alternatives considered** -- and why each was turned down.
 
-Where discussion produced a conflict or a trade-off, write it into the section
-it belongs to rather than into a changelog at the bottom. The disagreement is
+Where discussion produced a conflict or a trade-off, write it into the section it
+belongs to rather than into a changelog at the bottom. The disagreement is
 usually the most useful thing in the document.
+
+## Records are living documents
+
+A record is **edited to stay current**, not frozen on acceptance. Read
+`docs/decisions/` as the current state of the decisions made in this repository.
+
+Git is the log; the document is the projection. Every revision is kept and dated
+already, and `git log -p` on a record is there for anyone who wants the diff, so
+nothing is lost by keeping the file readable as it stands today.
+
+What makes that safe is that new information arrives as a **dated addition,
+marked as arriving after the decision** -- never as a silent revision of the
+original reasoning:
+
+> **2027-02-14 (after the decision):** re-running the benchmark on the 1.99
+> toolchain closes the gap to 4%, which weakens but does not reverse the
+> argument below.
+
+Accretion, not overwriting. Without that discipline a mutable record drifts
+toward what we now think we thought, and stops being evidence of a commitment
+made under specific information.
+
+[`0001-recording-important-decisions.md`](0001-recording-important-decisions.md)
+argues for all of this.
+
+## Status
+
+The `Status` line records **deviation from the expected lifecycle**. Made and
+built is the terminal state and carries no line at all; every status that exists
+names a way the record is not in that state.
+
+| Status | Meaning | Set when |
+| --- | --- | --- |
+| `Draft` | still being argued | while the pull request is open |
+| `Accepted YYYY-MM-DD -- not yet implemented` | decided, not yet built | a commit before the record's PR merges |
+| *(no status line)* | decided and built | the line is deleted by the last PR implementing it |
+| `Superseded by NNNN` | replaced | a commit before the superseding record merges |
+| `Deprecated -- see [section]` | withdrawn, not replaced | when the reversal is written into the record |
+
+Two consequences worth knowing:
+
+- The absence of a status is never reached by forgetting. A record merges
+  carrying its accepted date, and the line is *deleted* later, deliberately, by
+  the pull request that finishes the work.
+- The accepted date is not decoration. A record that sits unimplemented is the
+  hot air a decisions directory is prone to, and dating it makes it age in
+  public.
+
+`Deprecated` links to the section of its own record that explains the reversal.
+That is the difference from `Superseded`: superseded points outward to the
+successor, deprecated points inward to a dated addendum.
+
+## Editing versus superseding
+
+> Edit the record when the decision it documents is still the decision. Write a
+> new one when someone following the old record would now be doing the wrong
+> thing.
+
+The mechanical form of the same test, which is usually quicker to apply:
+
+> Can the change be written as a dated addition? It is an edit. Does it require
+> deleting a claim someone might have acted on? The old claim deserves to
+> survive as its own record.
+
+New data supporting the existing choice, a widened scope, a clarity rewrite: all
+edits. A reversal, or a decision that stands while its mechanism changes out from
+under it: a new record. Deliberately a judgement about a reader rather than
+something countable -- diff size measures effort and gets this wrong in both
+directions.
+
+## Dating claims that will not age well
+
+Anything in a record that is true *as of* rather than true: benchmark numbers,
+costs, quoted compiler output, toolchain behaviour, third-party capabilities.
+Say when it was measured, and against what.
+
+This is not a separate convention from the version stamp on quoted rustc output
+below -- that is this rule's first and strictest instance.
 
 ## Research
 

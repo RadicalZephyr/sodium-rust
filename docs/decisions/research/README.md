@@ -1,6 +1,6 @@
 # adr-research
 
-Experiments backing the architecture decision records in [`docs/adr/`](../).
+Experiments backing the decision records in [`docs/decisions/`](../).
 
 Any code that produces concrete data used to argue an ADR lives here rather
 than in a scratch file or a gist. An ADR that cites a measurement is only as
@@ -12,7 +12,7 @@ someone's working tree cannot be re-run at all.
 Each experiment is a binary named after the ADR it serves:
 
 ```text
-docs/adr/research/src/bin/0001-some-decision.rs
+docs/decisions/research/src/bin/0001-some-decision.rs
 ```
 
 and is run from the repository root:
@@ -52,9 +52,9 @@ stamp such a record has to carry.
 
 ## Retirement
 
-An experiment is maintained while its ADR is a draft. Once the record is
-accepted and the change it argued for has landed, the experiment leaves by one
-of two exits:
+An experiment is maintained while the decision it serves is still being argued
+or built. It leaves the moment that decision is done -- which the record states
+exactly, by dropping its status line -- through one of two exits:
 
 - **Deleted** -- it measured internals the ADR replaced. A binary that no
   longer compiles against the new code is deleted rather than repaired; cite

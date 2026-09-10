@@ -171,11 +171,34 @@ under both.
 
 ### Architecture decision records
 
-ADRs live in [`docs/decisions/`](docs/decisions/), one per file, `NNNN-kebab-case-title.md`.
-Every record opens as a **Draft** — drafts are edited freely without recording
-their own revision history; an accepted record is superseded rather than
-rewritten. Where discussion surfaced a conflict or a trade-off, write it into
-the section it belongs to. See [`docs/decisions/README.md`](docs/decisions/README.md).
+Decision records live in [`docs/decisions/`](docs/decisions/), one per file,
+`NNNN-kebab-case-title.md`. They are **living documents** — edited to stay
+current rather than frozen on acceptance, because git is the log and the
+document is the projection. New information goes in as a **dated addition marked
+as arriving after the decision**, never as a silent revision of the original
+reasoning. Read the directory as the current state of this repository's
+decisions. [`0001-recording-important-decisions.md`](docs/decisions/0001-recording-important-decisions.md)
+argues for all of it; [`README.md`](docs/decisions/README.md) beside it has the
+rules, and where a conflict or trade-off came up it belongs in the section it
+concerns rather than a changelog at the bottom.
+
+The `Status` line records **deviation from the expected lifecycle**, so
+made-and-built carries no status at all:
+
+| Status | Meaning |
+| --- | --- |
+| `Draft` | still being argued; only ever on an open PR |
+| `Accepted YYYY-MM-DD — not yet implemented` | decided, not yet built |
+| *(no status line)* | decided and built — the steady state |
+| `Superseded by NNNN` | replaced; the reasoning is in the successor |
+| `Deprecated — see [section]` | withdrawn; the reasoning is a dated addendum inside the record |
+
+Never add an `Implemented` status — the absence *is* that state, and the line is
+deleted by the PR that finishes the work rather than rewritten. Editing versus
+superseding: edit while the decision is still the decision; write a new record
+when someone following the old one would now do the wrong thing. Mechanically —
+if the change can be a dated addition it is an edit; if it means deleting a claim
+someone may have acted on, the old claim earns its own record.
 
 **Any code that produces concrete data used in the argumentation of an ADR must
 be committed somewhere a reader can run it** — a number quoted in an ADR has to
@@ -199,8 +222,9 @@ is checked in review. `version=stable` in a share link is a channel, not a
 version, so the link drifts; without the stamp a reader cannot tell whether
 rustc moved or the record was wrong.
 
-An experiment is maintained while its ADR is a draft. Once the record is
-accepted and the change has landed it leaves by one of two exits — **deleted**
+An experiment is maintained while the decision it serves is still being argued
+or built, and leaves the moment that decision is done — which the record states
+exactly, by dropping its status line. It goes by one of two exits — **deleted**
 (it measured internals the ADR replaced; a binary that no longer compiles is
 deleted, not repaired, and the ADR cites the commit that produced its numbers)
 or **promoted** (it still answers a live question, so it stopped being research:
@@ -208,7 +232,7 @@ a measurement worth re-running moves to `benches/`, a property we promise moves
 to `src/tests.rs`). It never lingers.
 
 So do not fix up a research binary that `cargo test --workspace` breaks on
-without first checking whether its ADR has been accepted; most records here
+without first checking whether its record still has a status line; most records
 argue for changing the internals the experiment was measuring, and breaking is
 the expected end of its life. The crate is a staging area, not an archive, and
 should trend toward empty.

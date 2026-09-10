@@ -5,7 +5,7 @@ edition = "2021"
 # Nothing here is part of the published crate; it exists so the numbers quoted
 # in an ADR can be re-derived instead of taken on trust.
 publish = false
-description = "Experiments backing the architecture decision records in docs/adr/"
+description = "Experiments backing the decision records in docs/decisions/"
 
 [dependencies]
 sodium-rust = { path = "../../.." }

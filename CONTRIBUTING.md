@@ -52,8 +52,27 @@ which follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 ## Architecture decision records
 
 Decisions whose *reasoning* is the valuable part get a record in
-[`docs/decisions/`](docs/decisions/). See [`docs/decisions/README.md`](docs/decisions/README.md) for
-the file convention and the draft/accepted lifecycle.
+[`docs/decisions/`](docs/decisions/). Records are living documents -- edited to
+stay current, with new information added as a dated note marked as arriving
+after the decision, never as a silent revision of the original reasoning. Read
+the directory as the current state of the project's decisions, and reach for
+`git log -p` when you want how it got there.
+[`docs/decisions/README.md`](docs/decisions/README.md) has the conventions;
+[`0001-recording-important-decisions.md`](docs/decisions/0001-recording-important-decisions.md)
+argues for them.
+
+A record's status moves with the work, and each transition is a commit you make
+deliberately:
+
+| When | Status becomes |
+| --- | --- |
+| while the record's PR is open | `Draft` |
+| a commit before that PR merges | `Accepted YYYY-MM-DD -- not yet implemented` |
+| the PR that finishes the work | *the status line is deleted* |
+| a commit before a superseding record merges | `Superseded by NNNN` |
+
+There is no `Implemented` status: decided-and-built is the steady state and says
+so by carrying no status line at all.
 
 Code that produces concrete data used in the argumentation of an ADR has to be
 committed somewhere a reader can run it -- a number quoted in an ADR has to be
@@ -63,10 +82,12 @@ at [`docs/decisions/research/`](docs/decisions/research/) as a binary named afte
 record; one needing only rustc and std goes in a Rust Playground share link
 recorded in the ADR.
 
-**Reviewing an ADR includes checking the version stamp.** A Playground link
-re-runs against whatever stable is current when it is clicked, so any rustc
-output quoted in a record has to say which version produced it. A record
-without that stamp cannot be checked later and should not be approved.
+**Reviewing a record includes checking two things.** First the version stamp: a
+Playground link re-runs against whatever stable is current when it is clicked, so
+any rustc output quoted in a record has to say which version produced it, and a
+record carrying none cannot be checked later. Second the status line, because its
+absence is a real state -- a record merging without one is claiming the work is
+already done. Neither should be approved on autopilot.
 
 ## Tests and research are not the same thing
 
