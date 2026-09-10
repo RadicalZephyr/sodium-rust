@@ -187,6 +187,15 @@ existed in a scratch buffer makes the ADR an assertion rather than an argument.
 Dependencies added there land in the `cargo-deny` graph like any other, so they
 must be license-compatible with BSD-3-Clause.
 
+An experiment is maintained while its ADR is a draft. Once the record is
+accepted and the change it argued for has landed, a binary that no longer
+compiles against the new internals is **deleted, not repaired** — the ADR cites
+the commit that produced its numbers, so history keeps the experiment. Do not
+fix up a research binary that `cargo test --workspace` breaks on without first
+checking whether its ADR has already been accepted; most records here argue for
+changing the internals the experiment was measuring, so breaking is the expected
+end of its life rather than a regression.
+
 ### Test what is mandated, measure what is chosen
 
 This crate is one port in the Sodium family, so the API's shape and semantics
