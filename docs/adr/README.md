@@ -39,9 +39,17 @@ usually the most useful thing in the document.
 Code that produces concrete data used in the argumentation of an ADR --
 benchmarks, memory measurements, probes into rustc behaviour -- **must** live
 in the `adr-research` workspace crate in [`research/`](research/), as a binary
-named after the ADR it serves. See [`research/src/lib.rs`](research/src/lib.rs)
-for the convention.
+named after the ADR it serves. See [`research/README.md`](research/README.md)
+for the convention, including when an experiment is retired.
 
 A number quoted in an ADR should be re-derivable by anyone with a checkout. If
 the experiment only ever existed in a scratch buffer, the ADR is asserting
 rather than arguing.
+
+Research is evidence, not a test. An ADR arguing for different internals should
+not bring tests with it -- they would be written against the structure the
+record exists to replace. The exception is an ADR whose argument is that this
+implementation diverges from Sodium's denotational semantics: that one gets a
+deliberately failing test in `src/tests.rs`, marked
+`#[ignore = "ADR-NNNN: ..."]`. See
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md#tests-and-research-are-not-the-same-thing).

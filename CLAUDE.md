@@ -24,6 +24,7 @@ cargo test --lib tests::switch_s                       # unit tests live in src/
 cargo test --lib tests::mem_test::mem                  # and its submodules
 cargo test --test closure_type_inference infers_map    # integration tests in tests/
 cargo test --test ui                                   # the trybuild suite
+cargo test --workspace -- --ignored                    # the known semantic gaps
 RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 ```
 
@@ -155,6 +156,10 @@ under both.
   reduced repros of the *old* failure so the reasoning stays checked rather
   than merely asserted. The `compile_fail` cases are gated to stable with
   `rustversion`.
+- `#[ignore = "ADR-NNNN: ..."]` tests in `src/tests.rs` — known gaps between
+  what Sodium's denotational semantics require and what this implementation
+  does. They are meant to fail; see the ADR conventions below before adding
+  or "fixing" one.
 
 ## Conventions
 
@@ -175,6 +180,43 @@ in an ADR has to be re-derivable from a checkout; an experiment that only ever
 existed in a scratch buffer makes the ADR an assertion rather than an argument.
 Dependencies added there land in the `cargo-deny` graph like any other, so they
 must be license-compatible with BSD-3-Clause.
+
+### Test what is mandated, measure what is chosen
+
+This crate is one port in the Sodium family, so the API's shape and semantics
+are mandated by Sodium's denotational semantics and are not up for debate here.
+Practically every ADR is therefore about the internal implementation, or about
+how those semantics should be spelled in Rust specifically — both things an ADR
+*intends* to change.
+
+So **do not write tests to motivate an ADR.** A test written against the
+structure an ADR exists to replace has to be rewritten when the change lands: it
+guarded nothing and only enlarged the diff. Support the argument with an
+experiment in `adr-research`, and let the existing suite keep checking that
+behaviour did not change while the internals did.
+
+The exception is an ADR whose argument is that our operational semantics diverge
+from Sodium's denotational semantics. That is a bug report rather than a design
+preference, and it does get a test — written against the semantics, so it will
+still be correct after the fix. Write it as the behaviour the library **ought**
+to have, so it fails, and mark it:
+
+```rust
+#[test]
+#[ignore = "ADR-0007: switch_c ought to take the inner cell's value in the same transaction"]
+```
+
+It sits with its neighbours in `src/tests.rs` rather than in a quarantine
+module. `#[ignore]` keeps CI green while the reason still prints on every
+ordinary `cargo test --workspace` run, so the gap advertises itself; run them
+deliberately with `cargo test --workspace -- --ignored`. Landing the fix deletes
+the attribute and nothing else.
+
+Do not "fix" a failing ignored test by editing the test. It encodes what the
+library owes Sodium; if it looks wrong, the ADR it names is the thing to argue
+with.
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) says all of this for human contributors.
 
 ### Changelog
 
