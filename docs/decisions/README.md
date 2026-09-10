@@ -24,6 +24,7 @@ Suggested sections, though the record should follow the argument rather than
 the template:
 
 - **Status** -- Draft, Accepted, or Superseded by NNNN.
+- **Date** -- YYYY-MM-DD,
 - **Context** -- the forces in play, including anything measured.
 - **Decision** -- what we are doing.
 - **Consequences** -- what this buys and what it costs, including the parts we
