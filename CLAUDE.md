@@ -223,8 +223,9 @@ Which of two homes depends on what the experiment needs:
 - **Needs `sodium-rust`** → a binary in the `adr-research` workspace crate at
   [`docs/decisions/research/`](docs/decisions/research/), named after the record
   (`src/bin/0001-some-decision.rs`, run with `cargo run --release -p
-  adr-research --bin 0001-some-decision`). Dependencies added there land in the
-  `cargo-deny` graph, so they must be license-compatible with BSD-3-Clause.
+  adr-research --bin 0001-some-decision`). A dependency added there is checked
+  for advisories but not for licenses: `deny.toml`'s allow list covers what we
+  redistribute, and nothing there is.
 - **Needs only rustc and std** → a Rust Playground share link recorded in the
   ADR. This is also the only route for a compile-time experiment: a case that
   must *fail* to compile cannot be a research binary, because a binary that does

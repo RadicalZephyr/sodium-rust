@@ -28,9 +28,13 @@ a timing harness -- and is empty until something is actually shared. Resist
 putting an experiment's own scaffolding there.
 
 This is a workspace member, so `cargo test --workspace` and
-`cargo clippy --workspace --all-targets` cover it, and dependencies added here
-land in the `cargo-deny` graph like any other. They have to be
-license-compatible with BSD-3-Clause.
+`cargo clippy --workspace --all-targets` cover it, and a dependency added here
+is checked for advisories like any other -- an experiment binary is still code
+someone runs, so not publishing it is no reason to skip that.
+
+It is not license-checked. The allow list in `deny.toml` covers what we
+redistribute and nothing here is, which is the same reason `criterion` and
+`trybuild` sit outside it too.
 
 ## What does not go here
 
