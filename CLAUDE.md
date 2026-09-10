@@ -171,11 +171,11 @@ under both.
 
 ### Architecture decision records
 
-ADRs live in [`docs/adr/`](docs/adr/), one per file, `NNNN-kebab-case-title.md`.
+ADRs live in [`docs/decisions/`](docs/decisions/), one per file, `NNNN-kebab-case-title.md`.
 Every record opens as a **Draft** — drafts are edited freely without recording
 their own revision history; an accepted record is superseded rather than
 rewritten. Where discussion surfaced a conflict or a trade-off, write it into
-the section it belongs to. See [`docs/adr/README.md`](docs/adr/README.md).
+the section it belongs to. See [`docs/decisions/README.md`](docs/decisions/README.md).
 
 **Any code that produces concrete data used in the argumentation of an ADR must
 be committed somewhere a reader can run it** — a number quoted in an ADR has to
@@ -183,7 +183,7 @@ be re-derivable from a checkout, or the record is asserting rather than arguing.
 Which of two homes depends on what the experiment needs:
 
 - **Needs `sodium-rust`** → a binary in the `adr-research` workspace crate at
-  [`docs/adr/research/`](docs/adr/research/), named after the record
+  [`docs/decisions/research/`](docs/decisions/research/), named after the record
   (`src/bin/0001-some-decision.rs`, run with `cargo run --release -p
   adr-research --bin 0001-some-decision`). Dependencies added there land in the
   `cargo-deny` graph, so they must be license-compatible with BSD-3-Clause.

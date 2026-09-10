@@ -52,14 +52,14 @@ which follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 ## Architecture decision records
 
 Decisions whose *reasoning* is the valuable part get a record in
-[`docs/adr/`](docs/adr/). See [`docs/adr/README.md`](docs/adr/README.md) for
+[`docs/decisions/`](docs/decisions/). See [`docs/decisions/README.md`](docs/decisions/README.md) for
 the file convention and the draft/accepted lifecycle.
 
 Code that produces concrete data used in the argumentation of an ADR has to be
 committed somewhere a reader can run it -- a number quoted in an ADR has to be
 re-derivable from a checkout, or the record is asserting rather than arguing.
 An experiment needing `sodium-rust` goes in the `adr-research` workspace crate
-at [`docs/adr/research/`](docs/adr/research/) as a binary named after the
+at [`docs/decisions/research/`](docs/decisions/research/) as a binary named after the
 record; one needing only rustc and std goes in a Rust Playground share link
 recorded in the ADR.
 
