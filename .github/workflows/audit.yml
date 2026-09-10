@@ -26,3 +26,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories
+          # `--workspace` roots the graph at every member rather than only the
+          # published `sodium-rust` closure. A vulnerable or unmaintained crate
+          # under `coz-driver` or `docs/decisions/research` is still code a
+          # developer runs locally, so not publishing it is no reason to skip
+          # it. Without this the action's default (`--all-features`) checks the
+          # root package alone and a member's dependencies are invisible here.
+          #
+          # Advisories only. The license allow list deliberately covers just
+          # what we redistribute, so widening *that* to the members would fail
+          # on compatible-but-unlisted licenses in code nobody ships.
+          arguments: --all-features --workspace
