@@ -119,10 +119,41 @@ Some things I measured that the design leans on:
   otherwise identical. Heap state is not the explanation: padding the context
   with 5000 live heap blocks instead of nodes moves the same body by 1.2%, in
   the *opposite* direction, against the 49% that 200 idle nodes add.
-- **Transaction overhead dominates fine-grained sends.** 2000 sends through
-  `sink -> map -> listen` cost 43 allocations each; the same 2000 sends inside
-  one `ctx.transaction()` cost 1 each. Roughly 26 of the 27 baseline
-  allocations are transaction machinery.
+- **Transaction overhead does not dominate fine-grained sends; coalescing does.**
+  The measurement this bullet used to report — 2000 sends through
+  `sink -> map -> listen` at 43 allocations each, versus 1 each inside one
+  `ctx.transaction()` — cannot support the conclusion I drew from it. The
+  batched arm sends 2000 times into *one* sink, and `Stream::_send` with no
+  coalescer sets `data.firing_op = Some(a)`, so the last write wins and 1999 of
+  those sends never propagate at all. `adr0001_timed_region.rs` says so in a
+  comment. The arm therefore removed 1999 propagations along with 1999
+  transactions, and attributing the whole difference to transaction machinery
+  is wrong.
+
+  Measured so the two are separable — an empty `ctx.transaction(|| {})`, then a
+  sweep of how many *distinct* sinks fire inside one transaction — the split is
+  close to the opposite of what was claimed:
+
+  | | allocations | ns |
+  |---|---|---|
+  | empty transaction, bare context | 0 | 270 |
+  | empty transaction, live subgraphs on the context | 0 | 272 |
+  | one bare send, `sink -> map -> listen` | 36 | 6 366 |
+  | marginal per additional firing sink in one transaction | 32–33 | ~6 100 |
+
+  A transaction with nothing to propagate allocates nothing and costs 270 ns,
+  flat in the size of the graph — `end_of_transaction` drains three empty
+  queues and runs `collect_cycles()` over an empty root set. Essentially all of
+  a send's cost is propagation. (These are post-`display_graph` numbers on a
+  context carrying several subgraphs, so they are not directly comparable to
+  the 27 and 43 quoted elsewhere; the ratio is the point, and the zero is
+  unambiguous.)
+
+  This matters beyond the ledger, because the discarded reading is advice.
+  "Batch your sends into a transaction to amortise the overhead" is wrong twice
+  over: there is almost no per-transaction overhead to amortise, and batching
+  repeated sends to one sink silently drops all but the last. A transaction is
+  a statement that events were simultaneous, not a buffering optimisation.
 - **`switch_s` reconfiguration costs O(the branch switched in)**, not
   O(downstream) and not O(graph). Growing the downstream graph from 0 to 64
   nodes leaves a flip at 68 allocations flat; growing the *upstream* branch
@@ -200,7 +231,7 @@ each isolating one term:
 | fan-out width at equal node count | whether shape matters beyond count |
 | fan-in width (`merge` tree) | join cost |
 | listener count | listener dispatch versus node dispatch |
-| transaction batch size | transaction overhead amortisation |
+| distinct sinks fired per transaction | per-transaction cost against propagation |
 | upstream branch size at a `switch_s` | reconfiguration cost |
 | live subgraphs on one context | steady-state cost as a graph accumulates |
 | release cycles on one context | degradation over a context's lifetime |
@@ -393,6 +424,10 @@ long-lived contexts require it regardless.
   removes 20% of the instructions and none of the time would pass a gate and
   buy nothing. I still want tier 1 for its determinism, but the gate may belong
   on tier 4's allocation counts instead.
-- What is the floor made of? 4 470 ns for `sink -> listen` is the largest single
-  cost in a small graph and I have not decomposed it. Batching eight sends into
-  one transaction saves only 4%, so it is not transaction open and close.
+- What is the floor made of? Not the transaction: an empty one is 0 allocations
+  and 270 ns, against ~3 400 ns for propagating a single event through the two
+  nodes `sink -> listen` cannot do without. So the floor is node cost too,
+  which means the slimming programme has no separate transaction workstream to
+  open — but it also means nothing here is cheap enough to ignore, and I have
+  not attributed those 3 400 ns any further than the profile in the section
+  above.

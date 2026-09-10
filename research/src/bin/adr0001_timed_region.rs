@@ -3,8 +3,9 @@
 //! The existing benchmarks rebuild the whole graph inside every `b.iter()`
 //! body, which looks like it ought to swamp the measurement. It does not. This
 //! experiment splits the timed region into its parts, checks that the listener
-//! body and the send count do not distort it either, and then prices the one
-//! thing that does dominate: the transaction.
+//! body and the send count do not distort it either, and then tries to price
+//! the transaction. Section 4 does not succeed at that; see the correction
+//! below the recorded output.
 //!
 //! Run with `cargo run --release -p research --bin adr0001_timed_region`.
 //! Release matters; the debug numbers are not comparable to anything.
@@ -43,8 +44,21 @@
 //! Conclusions that reached the ADR: construction is 0.1-0.3% of the timed
 //! region, so the existing benches really are measuring propagation; per-send
 //! cost is flat, so nothing accumulates within a run on a fresh context; the
-//! listener body is irrelevant at these sizes; and roughly 26 of the 27
-//! allocations a bare send costs are transaction machinery.
+//! listener body is irrelevant at these sizes.
+//!
+//! Section 4's conclusion — that roughly 26 of the 27 allocations a bare send
+//! costs are transaction machinery — was wrong, and the ADR now says so. The
+//! batched arm sends 2000 times into one sink, and `Stream::_send` without a
+//! coalescer just overwrites `firing_op`, so 1999 of those sends never
+//! propagate. The arm removes 1999 propagations as well as 1999 transactions,
+//! and the difference cannot be attributed to the transaction.
+//!
+//! Measured separably instead — an empty `ctx.transaction(|| {})`, and a sweep
+//! of how many *distinct* sinks fire inside one transaction — a transaction
+//! with nothing to propagate costs 0 allocations and 270 ns, flat in the size
+//! of the graph, while each additional firing sink costs 32-33 allocations and
+//! ~6100 ns. Almost all of a send is propagation. Replacing this section with
+//! that sweep is TODO; the numbers above are left as recorded.
 
 use std::hint::black_box;
 use std::time::Instant;
