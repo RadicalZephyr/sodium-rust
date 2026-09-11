@@ -171,6 +171,36 @@ under both.
 
 ## Conventions
 
+### What belongs in this file
+
+Three kinds of content, and only one of them may live here alone.
+
+**Normative** — conventions, gates, commands, process: anything that changes
+what someone does. [`CONTRIBUTING.md`](CONTRIBUTING.md) must carry all of it.
+Write it there for a human contributor and here for an agent where the register
+differs, but never introduce a rule here that a contributor reading only
+`CONTRIBUTING.md` would miss. A rule sequestered in an agent's briefing is a
+rule the people doing the work never saw.
+
+**Explanatory** — how the collector works, why every combinator is written
+twice. This belongs in `docs/`, in neither file, with a link from here. The
+architecture section above is a known exception; ADR-0001 says why it has not
+moved yet.
+
+**Agent-operational** — which document is authoritative, what to check before
+editing, how to navigate the repository. Meaningless to a human contributor, so
+it stays here and only here.
+
+The asymmetry only runs one way. `CONTRIBUTING.md` may carry material that never
+appears here — how to open a pull request, what to expect from review — so long
+as it is not a convention this file's reader has to follow.
+
+Conventions have an owner, and the rest are restatements. The ADR rules are
+owned by [`docs/decisions/README.md`](docs/decisions/README.md); what appears
+here and in `CONTRIBUTING.md` restates it. Change the owner first, then every
+restatement. A restatement that has fallen behind is worse than none, because
+it is read with the same confidence as the owner.
+
 ### Architecture decision records
 
 Decision records live in [`docs/decisions/`](docs/decisions/), one per file,
