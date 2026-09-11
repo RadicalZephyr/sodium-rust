@@ -94,7 +94,7 @@ depended on — and nothing else depends on — becomes collectable.
 An update closure reads its input's pending firing with
 `Stream::with_firing_op`, applies the user closure, and calls `Stream::_send`
 on its own stream. A firing lives in `StreamData::firing_op` for the duration
-of the transaction and is cleared by a `post` callback.
+of the transaction and is cleared by a `pre_post` callback.
 
 ### Transactions
 
@@ -105,8 +105,8 @@ of the transaction and is cleared by a `post` callback.
 1. drain `pre_eot` callbacks,
 2. loop draining `changed_nodes`, calling `update_node` on each until nothing
    is left,
-3. drain `pre_post` (this is where `visited` flags are reset), then `post`
-   (this is where firings are cleared),
+3. drain `pre_post` (this is where `visited` flags are reset and firings are
+   cleared), then `post` (deferred sends),
 4. `collect_cycles`, once the outermost transaction is done.
 
 `update_node` is a depth-first walk guarded by an atomic `visited` flag: it
