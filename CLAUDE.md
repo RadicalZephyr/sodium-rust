@@ -165,7 +165,9 @@ under both.
 - `#[ignore = "ADR-NNNN: ..."]` tests in `src/tests.rs` — known gaps between
   what Sodium's denotational semantics require and what this implementation
   does. They are meant to fail; see the ADR conventions below before adding
-  or "fixing" one.
+  or "fixing" one. There are none at present, which is itself a claim: no
+  divergence from the mandated semantics is currently known and recorded. So
+  `cargo test --workspace -- --ignored` runs nothing until one is.
 
 ## Conventions
 
