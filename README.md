@@ -103,15 +103,10 @@ This is a Cargo workspace.
 | `benches/` | Criterion benchmarks (`cargo bench`) |
 | `coz-driver/` | a causal-profiling workload — see [`coz-driver/README.md`](coz-driver/README.md) |
 | `tools/` | developer scripts, including the Coz installer |
-| `docs/` | implementation notes |
+| `docs/` | implementation notes, and the [decision records](docs/decisions/) |
+| `docs/decisions/research/` | the `adr-research` crate — experiments backing the records |
 
 ## Contributing
-
-Build and test everything in the workspace:
-
-```shell
-cargo test --workspace
-```
 
 CI runs these three commands, so running them before you push is the fastest
 way to know a change will pass:
@@ -124,13 +119,12 @@ cargo fmt --all -- --check
 
 Note that `--workspace` is load-bearing. The workspace root is itself a
 package, which makes it the sole default member, so a bare `cargo test` will
-not compile `coz-driver`.
+not compile `coz-driver` or `adr-research`.
 
-Tests run against stable, beta and nightly; nightly is allowed to fail.
-
-User-visible changes should get an entry in [`CHANGELOG.md`](CHANGELOG.md),
-which follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+[`CONTRIBUTING.md`](CONTRIBUTING.md) covers the rest: running a single test,
+the toolchain matrix, the changelog, when a change wants an architecture
+decision record, and why an ADR argues with an experiment rather than with a
+test.
 
 ## License
 
