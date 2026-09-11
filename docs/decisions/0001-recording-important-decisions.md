@@ -210,7 +210,8 @@ library *ought* to have, so it fails.
 
 `#[ignore]` was chosen over a quarantine module or a `should_panic` because of a
 property confirmed on rustc 1.98.1 (2026-09-01): the reason string prints on
-every ordinary test run, not only under `--ignored`.
+every ordinary test run, so the gap is visible without anyone passing
+`--ignored`.
 
 ```rust
 #[test]
