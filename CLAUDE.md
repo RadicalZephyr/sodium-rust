@@ -20,11 +20,11 @@ makes it the sole default member, so a bare `cargo test` skips `coz-driver` and
 Running one test:
 
 ```shell
-cargo test --lib tests::switch_s                       # unit tests live in src/tests.rs
-cargo test --lib tests::mem_test::mem                  # and its submodules
-cargo test --test closure_type_inference infers_map    # integration tests in tests/
-cargo test --test ui                                   # the trybuild suite
-cargo test --workspace -- --ignored                    # the known semantic gaps
+cargo test --lib tests::switch_s                           # unit tests live in src/tests.rs
+cargo test --lib tests::mem_test::mem                      # and its submodules
+cargo test --test closure_type_inference infers_listeners  # integration tests in tests/
+cargo test --test ui                                       # the trybuild suite
+cargo test --workspace -- --ignored                        # the known semantic gaps
 RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 ```
 
