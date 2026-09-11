@@ -41,8 +41,10 @@ before reaching for `overwrite`, because blessing on an older rustc commits its
 wording and turns CI red. The diff looks harmless when it happens: the article
 in `expected a`/`expected an` is a real example.
 
-Tests run against stable, beta and nightly, on Linux, macOS and Windows;
-nightly is allowed to fail. The MSRV is whatever `rust-version` in the root
+Tests run against stable, beta and nightly; nightly is allowed to fail. The
+toolchain matrix runs on Linux -- macOS and Windows get stable only, to catch
+platform-specific breakage in the GC's hand-written `Send`/`Sync` impls rather
+than to re-test rustc versions. The MSRV is whatever `rust-version` in the root
 `Cargo.toml` says, and CI checks it against the library alone.
 
 User-visible changes should get an entry in [`CHANGELOG.md`](CHANGELOG.md),
