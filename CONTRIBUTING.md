@@ -64,7 +64,7 @@ the directory as the current state of the project's decisions, and reach for
 argues for them.
 
 A record's status is a dated transition log in a collapsed block at the top of
-the file, and each row is a commit you add deliberately:
+the file, and each row is a transition you log deliberately:
 
 | When | Row you add |
 | --- | --- |
@@ -72,6 +72,14 @@ the file, and each row is a commit you add deliberately:
 | a commit before its pull request merges | `Accepted` |
 | the pull request that finishes the work | `Implemented` |
 | a commit before a superseding record merges | `Superseded by NNNN` |
+| when a reversal is written into the record | `Deprecated` |
+
+`Superseded` points outward, to the record that replaced this one.
+`Deprecated` points inward: the summary links to the section of this record
+explaining the reversal, which is why withdrawing a decision needs no successor
+record to stay accountable. A decision abandoned before anything was built on
+it is usually `Deprecated`; one that shipped and was later replaced is
+`Superseded`.
 
 The current state is the last row, restated in the summary line so a reader who
 never expands the block still knows where the record stands. The gap between
