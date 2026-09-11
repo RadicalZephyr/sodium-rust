@@ -321,7 +321,10 @@ Do not "fix" a failing ignored test by editing the test. It encodes what the
 library owes Sodium; if it looks wrong, the ADR it names is the thing to argue
 with.
 
-[`CONTRIBUTING.md`](CONTRIBUTING.md) says all of this for human contributors.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) states this for human contributors, and
+carries process that never appears here. Read it before changing how anything
+in this repository is done — it is not a restatement of this file, and treating
+it as one is how a convention ends up in only one of the two.
 
 ### Changelog
 
