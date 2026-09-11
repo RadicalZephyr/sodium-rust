@@ -240,19 +240,19 @@ rustc moved or the record was wrong.
 
 An experiment is maintained while the decision it serves is still being argued
 or built, and leaves the moment that decision is done — which the record dates
-exactly, in the `Implemented` row of its status log. It goes by one of two
-exits — **deleted**
-(it measured internals the ADR replaced; a binary that no longer compiles is
-deleted, not repaired, and the ADR cites the commit that produced its numbers)
-or **promoted** (it still answers a live question, so it stopped being research:
-a measurement worth re-running moves to `benches/`, a property we promise moves
-to `src/tests.rs`). It never lingers.
+exactly, in the `Implemented` row of its status log, or in the `Deprecated` row
+if the decision was withdrawn rather than built. It goes by one of two exits —
+**deleted** (it measured internals the ADR replaced; a binary that no longer
+compiles is deleted, not repaired, and the ADR cites the commit that produced
+its numbers) or **promoted** (it still answers a live question, so it stopped
+being research: a measurement worth re-running moves to `benches/`, a property
+we promise moves to `src/tests.rs`). It never lingers.
 
 So do not fix up a research binary that `cargo test --workspace` breaks on
-without first checking whether its record has logged `Implemented`; most records
-argue for changing the internals the experiment was measuring, and breaking is
-the expected end of its life. The crate is a staging area, not an archive, and
-should trend toward empty.
+without first checking whether its record has logged `Implemented` or
+`Deprecated`; most records argue for changing the internals the experiment was
+measuring, and breaking is the expected end of its life. The crate is a staging
+area, not an archive, and should trend toward empty.
 
 ### Test what is mandated, measure what is chosen
 
