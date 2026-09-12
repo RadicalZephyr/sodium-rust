@@ -107,11 +107,16 @@ Some things I measured that the design leans on:
 - **Every `switch_s` and `switch_c` site pays for a `Cell::map` it does not
   need.** Both wrappers do `csa.map(|sa| sa.impl_.clone())` before reaching the
   switch nodes proper (`src/cell.rs:366` and `:373`), purely to unwrap a
-  newtype — two extra nodes per switch site, which neither the Java nor the F#
-  Sodium pays. The petrol pump has nine switch sites in its output plumbing, so
-  that is eighteen nodes of pure overhead in one application. Worth an issue in
-  its own right; noted here because it is the sort of thing the suite is
-  supposed to find, and it turned up before the suite exists.
+  newtype that neither the Java nor the F# Sodium has to unwrap at all.
+  Removing it saves two nodes at a `switch_c` and one at a `switch_s` —
+  measured rather than derived, and the asymmetry is the reason to measure: a
+  standalone `Cell::map` costs two nodes, but only one of them survives into
+  `node_count` inside `switch_s`. The book's petrol pump has ten switch sites
+  in its output plumbing, seven `switchC` and three `switchS`, so a faithful
+  port of that one graph would carry seventeen nodes of pure overhead. Filed as
+  [#44](https://github.com/RadicalZephyr/sodium-rust/issues/44), with a branch. Noted
+  here because it is the sort of thing the suite is supposed to find, and it
+  turned up before the suite exists.
 - **Callgrind instruction counts vary by at most 0.013% run to run**, across
   all eighteen arms of the bench, and the four small ones came back
   bit-identical. A 1% regression in a single combinator sits roughly 75× above

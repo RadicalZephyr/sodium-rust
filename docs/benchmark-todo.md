@@ -85,7 +85,7 @@ within a phase mostly are not. Numbers to assert against come from [the
 - [ ] Every Java in-closure `sample()` converted to `snapshot3` / `*_with_deps`, not dropped
 - [ ] `Vec<Listener>` in the harness in place of Java's `Listener::append`
 - [ ] Clock sent as the first event of each frame (no `TimerSystem`, `post` runs after)
-- [ ] File an issue for the hidden `Cell::map` inside `switch_s` / `switch_c` (2 nodes per site)
+- [x] File an issue for the hidden `Cell::map` inside `switch_s` / `switch_c` — [#44](https://github.com/RadicalZephyr/sodium-rust/issues/44) (2 nodes at a `switch_c`, 1 at a `switch_s`)
 - [ ] `Sync` bound on payloads in any `Stream::split` scenario
 
 

@@ -272,10 +272,12 @@ The survey turned up several things that will bite:
   value itself as the first event of each frame. This is one reason the
   continuous-time shapes sit in the backlog.
 - **`Cell::switch_s` and `switch_c` insert a hidden `Cell::map`.** The wrappers
-  do `csa.map(|sa| sa.impl_.clone())` before the switch nodes proper, so every
-  switch site costs two nodes that neither the Java nor the F# version pays.
-  Worth measuring on its own, and worth an issue: if that clone can be avoided,
-  every dynamic graph in the library gets cheaper.
+  do `csa.map(|sa| sa.impl_.clone())` before the switch nodes proper, costing
+  two nodes at a `switch_c` and one at a `switch_s` that neither the Java nor
+  the F# version pays. Filed as
+  [#44](https://github.com/RadicalZephyr/sodium-rust/issues/44) with a branch, so a
+  scenario written against a fixed library will report different node counts
+  from one written today — check which you are on before recording a baseline.
 - **`Stream::split` carries an extra `Sync` bound** that Java does not, so
   payloads in any split benchmark must be `Sync`.
 
