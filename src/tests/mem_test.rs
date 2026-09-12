@@ -1,3 +1,4 @@
+use crate::Cell;
 use crate::CellSink;
 use crate::SodiumCtx;
 use crate::StreamSink;
@@ -75,4 +76,41 @@ fn map_c_mem() {
     println!("node_count {}", node_count);
     println!("node_ref_count {}", node_ref_count);
     assert_eq!(node_count, 0);
+}
+
+/// `Cell::switch_s` and `Cell::switch_c` used to build a derived cell, via
+/// `Cell::map`, whose only job was to unwrap the public newtype into the
+/// `impl_` type underneath. The selector is only ever read through `sample`
+/// and `updates`, so the unwrapping happens at those points instead, and the
+/// intermediate cell is gone.
+///
+/// These counts are what stops it creeping back. They are not a contract —
+/// change them when the switch machinery genuinely changes shape — but a
+/// change here should be a change somebody meant to make.
+#[test]
+fn switch_node_count() {
+    init();
+    let sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &sodium_ctx;
+
+    let ss: StreamSink<i32> = sodium_ctx.new_stream_sink();
+    let which_s = sodium_ctx.new_cell_sink(ss.stream());
+    let before = sodium_ctx.impl_.node_count();
+    let switched_s = Cell::switch_s(&which_s.cell());
+    let switch_s_nodes = sodium_ctx.impl_.node_count() - before;
+
+    let cs: CellSink<i32> = sodium_ctx.new_cell_sink(3);
+    let which_c = sodium_ctx.new_cell_sink(cs.cell());
+    let before = sodium_ctx.impl_.node_count();
+    let switched_c = Cell::switch_c(&which_c.cell());
+    let switch_c_nodes = sodium_ctx.impl_.node_count() - before;
+
+    println!();
+    println!("switch_s nodes {switch_s_nodes}");
+    println!("switch_c nodes {switch_c_nodes}");
+    assert_eq!(switch_s_nodes, 2, "Cell::switch_s node count");
+    assert_eq!(switch_c_nodes, 3, "Cell::switch_c node count");
+
+    drop(switched_s);
+    drop(switched_c);
 }

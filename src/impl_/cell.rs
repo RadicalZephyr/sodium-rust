@@ -450,6 +450,22 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
+        Cell::switch_s_by(csa, |s: &Stream<A>| s.clone())
+    }
+
+    /// `switch_s`, but reading the inner stream out of whatever the selector
+    /// cell happens to hold.
+    ///
+    /// The selector is only ever consumed through `sample` and `updates`, so a
+    /// wrapper around `Stream<A>` can be unwrapped at those two points instead
+    /// of by deriving a whole new cell with `map`.
+    pub fn switch_s_by<S, F>(csa: &Cell<S>, unwrap: F) -> Stream<A>
+    where
+        A: Clone,
+        S: Clone + Send + 'static,
+        F: Fn(&S) -> Stream<A> + Send + Sync + 'static,
+    {
+        let unwrap = Arc::new(unwrap);
         let csa = csa.clone();
         let sodium_ctx = csa.sodium_ctx();
         Stream::_new(&sodium_ctx, |sa: StreamWeakForwardRef<A>| {
@@ -479,9 +495,10 @@ impl<A: Send + 'static> Cell<A> {
                 let inner_s = inner_s.clone();
                 let csa = csa.clone();
                 let node1 = node1.clone();
+                let unwrap = unwrap.clone();
                 sodium_ctx.pre_eot(move || {
                     let mut inner_s = inner_s.lock();
-                    let s = csa.sample();
+                    let s = unwrap(&csa.sample());
                     *inner_s = Stream::downgrade(&s);
                     node1.add_dependency(s);
                 });
@@ -494,13 +511,14 @@ impl<A: Send + 'static> Cell<A> {
                 let node1: Node = node1.clone();
                 let sodium_ctx = sodium_ctx.clone();
                 let sodium_ctx2 = sodium_ctx.clone();
+                let unwrap = unwrap.clone();
                 node2 = Node::new(
                     &sodium_ctx2,
                     NodeName::CELL_SWITCH_S_OUTER,
                     move || {
-                        csa_updates.with_firing_op(|firing_op: &mut Option<Stream<A>>| {
+                        csa_updates.with_firing_op(|firing_op: &mut Option<S>| {
                             if let Some(ref firing) = firing_op {
-                                let firing = firing.clone();
+                                let firing = unwrap(firing);
                                 let node1 = node1.clone();
                                 let inner_s = inner_s.clone();
                                 sodium_ctx.pre_post(move || {
@@ -525,6 +543,19 @@ impl<A: Send + 'static> Cell<A> {
     where
         A: Clone,
     {
+        Cell::switch_c_by(cca, |c: &Cell<A>| c.clone())
+    }
+
+    /// `switch_c`, but reading the inner cell out of whatever the selector
+    /// cell happens to hold. See [`switch_s_by`][Cell::switch_s_by].
+    pub fn switch_c_by<S, F>(cca: &Cell<S>, unwrap: F) -> Cell<A>
+    where
+        A: Clone,
+        S: Clone + Send + 'static,
+        F: Fn(&S) -> Cell<A> + Send + Sync + 'static,
+    {
+        let unwrap = Arc::new(unwrap);
+        let unwrap2 = unwrap.clone();
         let cca2 = cca.clone();
         let cca = cca.clone();
         let sodium_ctx = cca.sodium_ctx();
@@ -546,9 +577,10 @@ impl<A: Send + 'static> Cell<A> {
                 let last_inner_s = last_inner_s.clone();
                 let cca = cca.clone();
                 let node2 = node2.clone();
+                let unwrap = unwrap.clone();
                 sodium_ctx.pre_eot(move || {
                     let mut last_inner_s = last_inner_s.lock();
-                    let s = cca.sample().updates();
+                    let s = unwrap(&cca.sample()).updates();
                     *last_inner_s = Stream::downgrade(&s);
                     node2.add_dependency(s);
                 });
@@ -561,29 +593,30 @@ impl<A: Send + 'static> Cell<A> {
                 let cca = cca.clone();
                 let sa = sa.clone();
                 let last_inner_s = last_inner_s.clone();
+                let unwrap = unwrap.clone();
                 node1_update = move || {
-                    cca.updates()
-                        .with_firing_op(|firing_op: &mut Option<Cell<A>>| {
-                            if let Some(ref firing) = firing_op {
-                                // will be overwriten by node2 firing if there is one
-                                sodium_ctx.update_node(firing.updates().node());
-                                let sa = sa.unwrap();
-                                sa._send(firing.sample());
-                                node1.data.changed.store(true, Ordering::SeqCst);
-                                node2.data.changed.store(true, Ordering::SeqCst);
-                                let new_inner_s = firing.updates();
-                                new_inner_s.with_firing_op(|firing2_op: &mut Option<A>| {
-                                    if let Some(ref firing2) = firing2_op {
-                                        sa._send(firing2.clone());
-                                    }
-                                });
-                                let mut last_inner_s = last_inner_s.lock();
-                                node2.remove_dependency(last_inner_s.upgrade().unwrap().node());
-                                node2.add_dependency(new_inner_s.clone());
-                                node2.data.changed.store(true, Ordering::SeqCst);
-                                *last_inner_s = Stream::downgrade(&new_inner_s);
-                            }
-                        });
+                    cca.updates().with_firing_op(|firing_op: &mut Option<S>| {
+                        if let Some(ref firing) = firing_op {
+                            let firing = unwrap(firing);
+                            // will be overwriten by node2 firing if there is one
+                            sodium_ctx.update_node(firing.updates().node());
+                            let sa = sa.unwrap();
+                            sa._send(firing.sample());
+                            node1.data.changed.store(true, Ordering::SeqCst);
+                            node2.data.changed.store(true, Ordering::SeqCst);
+                            let new_inner_s = firing.updates();
+                            new_inner_s.with_firing_op(|firing2_op: &mut Option<A>| {
+                                if let Some(ref firing2) = firing2_op {
+                                    sa._send(firing2.clone());
+                                }
+                            });
+                            let mut last_inner_s = last_inner_s.lock();
+                            node2.remove_dependency(last_inner_s.upgrade().unwrap().node());
+                            node2.add_dependency(new_inner_s.clone());
+                            node2.data.changed.store(true, Ordering::SeqCst);
+                            *last_inner_s = Stream::downgrade(&new_inner_s);
+                        }
+                    });
                 };
             }
             node1.add_update_dependencies(vec![
@@ -613,7 +646,7 @@ impl<A: Send + 'static> Cell<A> {
             }
             node2
         })
-        .hold_lazy(Lazy::new(move || cca2.sample().sample()))
+        .hold_lazy(Lazy::new(move || unwrap2(&cca2.sample()).sample()))
     }
 
     pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener

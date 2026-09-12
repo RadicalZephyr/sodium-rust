@@ -363,14 +363,14 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// Unwrap a [`Stream`] in a `Cell` to give a time-varying stream implementation.
     pub fn switch_s(csa: &Cell<Stream<A>>) -> Stream<A> {
         Stream {
-            impl_: CellImpl::switch_s(&csa.map(|sa| sa.impl_.clone()).impl_),
+            impl_: CellImpl::switch_s_by(&csa.impl_, |sa: &Stream<A>| sa.impl_.clone()),
         }
     }
 
     /// Unwrap a `Cell` in another `Cell` to give a time-varying cell implementation.
     pub fn switch_c(cca: &Cell<Cell<A>>) -> Cell<A> {
         Cell {
-            impl_: CellImpl::switch_c(&cca.map(|ca| ca.impl_.clone()).impl_),
+            impl_: CellImpl::switch_c_by(&cca.impl_, |ca: &Cell<A>| ca.impl_.clone()),
         }
     }
 
