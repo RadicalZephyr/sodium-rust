@@ -671,12 +671,36 @@ says so -- and the visitor reports nothing, because the identifier it can see is
 
 Which is the same failure, in the same place, as the refcount experiment below:
 one layer of sharing between the closure and the node, and the node is invisible.
-That is not a coincidence, and it is the useful thing this record can say about
-automatic dependency discovery. **Whether a closure reaches a node is a property
-of what its handles point at, which is neither a syntactic property of the
-closure's text nor a shallow property of its captures.** A capture visitor reads
-the text. A refcount delta reads one level of `Arc::clone`. Both answer a question
-adjacent to the one that matters, and both answer it confidently.
+That is not a coincidence. **Whether a closure reaches a node is a property of
+what its handles point at, which is neither a syntactic property of the closure's
+text nor a shallow property of its captures.** A capture visitor reads the text. A
+refcount delta reads one level of `Arc::clone`. Both answer a question adjacent to
+the one that matters, and both answer it confidently.
+
+That rules out these two techniques. It does not rule out automatic discovery,
+and an earlier draft of this record let the first slide into the second. The
+property being sought is reachability through arbitrary data, and the answer the
+Rust GC ecosystem converged on is a `Trace` trait: every type declares how to find
+the collector's pointers inside it, recursively, with a derive for the common case
+-- [`ferris_gc::Trace`](https://docs.rs/ferris-gc/latest/ferris_gc/trait.Trace.html)
+is one of several (checked 2026-09-14). Recursion is the thing both techniques
+above lack, and neither can be patched into having it.
+
+We already have the visitor half. `src/impl_/gc_node.rs` declares
+
+```rust
+pub type Tracer<'a> = dyn FnMut(&GcNode) + 'a;
+pub type Trace = dyn Fn(&mut Tracer) + Send + Sync;
+```
+
+and every `GcNode` carries one. What is missing is a *trait*, letting that visitor
+walk a user's data, and a derive so that writing one is not a per-type obligation.
+In that vocabulary `Dep` is a hand-rolled trace for the single boundary the
+protocol cannot cross -- a closure, whose captures have no type to implement
+anything on -- and `*_with_deps` asks the caller to write the depth-one case
+themselves. That is a fair description of what this crate can check today rather
+than a claim about what is checkable. Whether it should grow into a real trait is
+in *Open questions*.
 
 So we are not willing to buy ergonomics with a mechanism that silently
 under-reports, when a `Dep` that is wrong corrupts the collector's reference
@@ -919,6 +943,22 @@ there was a reportable rustc bug in there, distinct from the deduction behaviour
 documented above -- which is working as designed and not a bug at all. If anyone
 still has one of those error messages, it is worth a look before the memory of
 them goes.
+
+**Whether closure captures should be traced rather than declared.** `Dep` is a
+manual, depth-one trace for the one boundary the collector's visitor cannot cross,
+and the ecosystem's answer to the general problem -- a `Trace` trait plus a derive
+-- recurses, so it does not have the blind spot both experiments above found.
+Adapting it here is not a small change, and at least three questions come first. A
+trait cannot be implemented for an anonymous closure type, so the closure would
+have to be desugared into a named struct with typed fields -- the capture-visiting
+macro again, this time doing something it can actually do. Our nodes are
+`Arc`-backed and the graph is full of `parking_lot` locks while the collector runs
+at the end of the outermost transaction, so tracing *through* a lock is a deadlock
+question rather than a traversal one; it is worth establishing whether the
+ecosystem's `Trace` impls cover `Arc`, `Mutex` and `RwLock` at all, or stop at
+owned containers for exactly that reason. And a trace that misses an edge frees
+live data, so whether such a trait is `unsafe` is a real decision rather than a
+style one.
 
 **What the 2020 thread was actually about.** Issue #48 opened on whether the
 combinators should be bounded on `Fn` rather than `FnMut`; closure inference was
