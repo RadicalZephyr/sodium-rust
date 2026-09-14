@@ -45,6 +45,12 @@ useful thing in this document.
 7. **Component-level parallelism is already available** -- two `SodiumCtx`
    instances on two threads are fully independent and behave correctly today
    (§2.5).
+8. **A Sodium transaction has no failure atomicity.** A panicking user closure
+   does not roll its transaction back; it kills the whole `SodiumCtx`,
+   permanently and silently, including unrelated graphs on that context
+   (Experiment 7, filed as [#48][issue48]). This is single-threaded and has
+   nothing to do with concurrency, but it undermines the vocabulary the rest
+   of this report reasons in -- see §5.
 
 ## 1. What the literature says
 
@@ -698,6 +704,54 @@ worth doing.
 
 ## 5. What this report does not settle
 
+### The two questions this report did not ask
+
+These are upstream of everything else, and this document walked past both --
+scoring every design in §1 against a criterion it never checked applied.
+
+**What is the weakest guarantee that still makes Sodium's semantics true?**
+Every design surveyed is scored against abort-free strict serializability, a
+criterion imported from databases, where a transaction's defining property is
+atomicity. A Sodium transaction has none. Experiment 7 shows a panicking user
+closure does not roll its transaction back -- it kills the entire `SodiumCtx`,
+permanently and silently, taking unrelated graphs on that context with it. The
+mechanism is `end_of_transaction` raising `transaction_depth` before the
+propagation loop (`src/impl_/sodium_ctx.rs:235`) and lowering it after (`:264`);
+an unwind skips the decrement and the counter never reaches zero again.
+
+So "transaction" here means a *simultaneity batch*, not an all-or-nothing unit.
+§1.3 already records that glitch freedom is strictly weaker than
+serializability -- and then the rest of this report scores against
+serializability anyway. The gap between the two is exactly where FullMV's
+expensive machinery lives: the stored serialization graph, the version
+histories and retrofitting all exist to deliver the stronger property. If
+Sodium owes only glitch freedom plus a well-defined simultaneity relation,
+there may be a far cheaper construction, and §4's ordering was derived by
+pricing the wrong target.
+
+It also sharpens [#47][issue47]. Filed as "transactions merge", it is really
+*the simultaneity relation is currently a function of wall-clock interleaving
+rather than of causality*. A global transaction lock answers that by fiat --
+whoever acquires it first is earlier -- which is a legitimate answer, but it
+should be a chosen one rather than a side effect of the mechanism.
+
+**Does concurrency belong inside the engine, or at its boundary?** Every design
+considered here puts it inside the propagation engine. Elm, RxJS and Akka all
+put it at the edge: the engine stays a sequencer, work happens off-graph and
+returns as an ordinary event. Two things argue for the boundary. The output
+stage has to serialize regardless -- UI toolkits are thread-affine, so listener
+callbacks need a designated thread -- which means interior parallelism must pay
+for itself entirely in the interior, and §2.2 measures the interior as
+nanoseconds of user work under microseconds of bookkeeping. And the deferral
+machinery already exists in `Operational::defer` and the `post` queue. If the
+answer is "at the boundary", then none of §1 applies and the work is a
+combinator that hands off to a thread pool and returns an event: a much smaller
+project, an obvious API shape, no scheduler. It sits second only because you
+cannot decide what crossing the boundary must preserve until you know what is
+owed.
+
+### Loose ends
+
 - **Whether there is a workload that wants this at all.** Everything above is
   about feasibility. None of it establishes demand. The reachability walk in
   Experiment 5 would answer it against a real application graph, which is the
@@ -710,7 +764,7 @@ worth doing.
 - **Whether opt-in async (§1.5) is acceptable here.** If explicit annotation is
   allowed, the design space collapses dramatically and the STM question mostly
   goes away. If parallelism must be automatic to be worth having, it does not.
-- **Where pre-ADR experiments live.** The four experiments below produce
+- **Where pre-ADR experiments live.** The experiments below produce
   numbers this document argues from, and the repository's rule is that such
   code must be re-runnable from a checkout. But `adr-research` names its
   binaries after the record they serve, and there is no record here yet. They
@@ -726,7 +780,7 @@ worth doing.
 
 ## Reproducing the measurements
 
-Experiments 1-4 and 6 are standalone integration tests: drop each in `tests/`,
+Experiments 1-4, 6 and 7 are standalone integration tests: drop each in `tests/`,
 run the given command, delete it. Experiment 5 needs crate-internal access to
 walk the node graph, so it goes in `src/tests.rs` instead.
 
@@ -1107,6 +1161,73 @@ fn separate_contexts_do_not_interfere() {
 }
 ```
 
+### Experiment 7 -- a transaction has no failure atomicity
+
+`cargo test --test scratch -- --nocapture`
+
+```rust
+use sodium_rust::SodiumCtx;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::{Arc, Mutex};
+
+#[test]
+fn what_exactly_does_the_panic_break() {
+    let ctx = SodiumCtx::new();
+
+    // Graph 1: contains the panicking closure.
+    let bad_sink = ctx.new_stream_sink::<i32>();
+    let seen1 = Arc::new(Mutex::new(Vec::new()));
+    let l1 = {
+        let seen = seen1.clone();
+        bad_sink
+            .stream()
+            .map(|v: &i32| {
+                if *v == 13 { panic!("boom") }
+                v * 2
+            })
+            .listen(move |v: &i32| seen.lock().unwrap().push(*v))
+    };
+
+    // Graph 2: entirely independent, same context, no shared nodes.
+    let good_sink = ctx.new_stream_sink::<i32>();
+    let seen2 = Arc::new(Mutex::new(Vec::new()));
+    let l2 = {
+        let seen = seen2.clone();
+        good_sink.stream().listen(move |v: &i32| seen.lock().unwrap().push(*v))
+    };
+
+    good_sink.send(1);
+    println!("independent graph before panic : {:?}", seen2.lock().unwrap());
+
+    let _ = catch_unwind(AssertUnwindSafe(|| bad_sink.send(13)));
+
+    good_sink.send(2);
+    println!("independent graph after panic  : {:?}", seen2.lock().unwrap());
+    println!("  -> if [1], the damage is context-wide, not node-local");
+
+    // Does an explicit transaction recover it?
+    ctx.transaction(|| good_sink.send(3));
+    println!("after an explicit transaction  : {:?}", seen2.lock().unwrap());
+
+    // A fresh context on the same thread:
+    let ctx2 = SodiumCtx::new();
+    let s3 = ctx2.new_stream_sink::<i32>();
+    let seen3 = Arc::new(Mutex::new(Vec::new()));
+    let l3 = {
+        let seen = seen3.clone();
+        s3.stream().listen(move |v: &i32| seen.lock().unwrap().push(*v))
+    };
+    s3.send(99);
+    println!("fresh context                  : {:?}", seen3.lock().unwrap());
+    drop((l1, l2, l3));
+    println!("panicking graph's own output   : {:?}", seen1.lock().unwrap());
+}
+```
+
+Observed on `bfaf2e2`: the independent graph reads `[1]` both before and after
+the panic, no later transaction recovers it, and a freshly constructed context
+works normally. The damage is context-wide and permanent, not node-local.
+
 ## Bibliography
 
 **Reactive runtimes and concurrency**
@@ -1200,3 +1321,4 @@ fn separate_contexts_do_not_interfere() {
 [calvin]: http://www.cs.umd.edu/~abadi/papers/calvin-tods14.pdf
 [contributing]: ../../CONTRIBUTING.md
 [issue47]: https://github.com/RadicalZephyr/sodium-rust/issues/47
+[issue48]: https://github.com/RadicalZephyr/sodium-rust/issues/48
