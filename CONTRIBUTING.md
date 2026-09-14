@@ -97,6 +97,16 @@ at [`docs/decisions/research/`](docs/decisions/research/) as a binary named afte
 record; one needing only rustc and std goes in a Rust Playground share link
 recorded in the ADR.
 
+A Playground experiment is written as four parts in a fixed order: a bolded
+label saying what it demonstrates, the source in a code block, its output in a
+`text` block, and a provenance line as a blockquote beneath them, reading
+`rustc VERSION (released DATE) - output checked DATE - [Rust Playground](URL)`.
+The fences stay bare. Both dates matter: the released date belongs to the
+compiler that produced the quoted output, the checked date is when someone last
+confirmed the link still produces it.
+[`0001-recording-important-decisions.md`](docs/decisions/0001-recording-important-decisions.md)
+carries the worked example.
+
 **Reviewing a record includes checking two things.** First the version stamp: a
 Playground link re-runs against whatever stable is current when it is clicked, so
 any rustc output quoted in a record has to say which version produced it, and a

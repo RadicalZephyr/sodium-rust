@@ -227,6 +227,8 @@ property confirmed on rustc 1.98.1 (2026-09-01): the reason string prints on
 every ordinary test run, so the gap is visible without anyone passing
 `--ignored`.
 
+**Experiment -- an `#[ignore]` reason prints on an ordinary test run**
+
 ```rust
 #[test]
 #[ignore = "ADR-0007: switch_c ought to take the inner cell's value in the same transaction"]
@@ -235,27 +237,23 @@ fn switch_c_simultaneous() {
 }
 ```
 
-Output:
-
 ```text
 test switch_c_simultaneous ... ignored, ADR-0007: switch_c ought to take the inner cell's value in the same transaction
 ```
 
-- **Date**: 2026-09-01
-- **Rust Version**: 1.98.1
-- [**Playground**](https://play.rust-lang.org/?version=stable&mode=debug&edition=2024&gist=bb1bc640d9a67866d8c90f369972da57)
+> rustc 1.98.1 (released 2026-09-01) - output checked 2026-09-14 - [Rust Playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2024&gist=bb1bc640d9a67866d8c90f369972da57)
 
 So a known gap advertises itself in normal output while CI stays green, and
 landing the fix deletes one attribute line rather than rewriting a test.
 
-Note above we have the three artifacts the rule above asks for: the
-source and its output are the two blocks here, produced by rustc
-1.98.1 (2026-09-01), and [the Playground
-link](https://play.rust-lang.org/?version=stable&mode=debug&edition=2024&gist=bb1bc640d9a67866d8c90f369972da57)
-re-runs it, checked on 2026-09-14. `version=stable` is a channel, so
-clicking it later runs against whatever stable is current then --
-which is why the version stamp above, not the link, is the part that
-makes this falsifiable.
+That block is the shape every Playground experiment takes: a label saying what
+it demonstrates, the source, its output, and a provenance line. Later records
+need only the four parts; this one explains them because it is establishing
+them. Two dates appear because they answer different questions -- the compiler
+is what produced the output quoted here, and the check date is when someone
+last confirmed the link still produces it. `version=stable` is a channel rather
+than a version, so the link drifts and only the compiler stamp makes the quoted
+output falsifiable later.
 
 ## Alternatives considered
 

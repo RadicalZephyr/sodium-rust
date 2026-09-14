@@ -164,19 +164,46 @@ compile breaks the workspace build.
 See [`research/README.md`](research/README.md) for the crate, including how an
 experiment is retired.
 
-### Playground experiments carry three things, not one
+### Playground experiments carry four things, not one
 
 A share link is live, not frozen. Its `version=stable` is a *channel*, not a
 version, so it re-runs against whatever stable is current on the day someone
 clicks it -- the wording of a diagnostic will drift out from under the record,
 and the same code may eventually compile clean. So a Playground experiment is
-recorded as three artifacts, each doing one job:
+recorded as four parts, in this order, each doing one job:
 
-1. **The share link** -- live convenience, one click to a running compiler.
+1. **A label**, bolded, saying what the experiment demonstrates -- so a reader
+   skimming knows whether to stop.
 2. **The source, in a code block** -- the frozen record. Not a backup against
    the gist being deleted; it is what the ADR actually argued from.
-3. **The rustc version the quoted output came from** -- e.g. *rustc 1.98.1
-   (2026-09-01), edition 2021*, stamped beside the output.
+3. **Its output, in a `text` code block** -- what the quoted claim rests on.
+4. **A provenance line**, as a blockquote directly beneath, carrying the rustc
+   version that produced the output, the date it was last checked, and the
+   share link -- live convenience, one click to a running compiler.
+
+````markdown
+**Experiment -- what it shows**
+
+```rust
+...
+```
+
+```text
+...
+```
+
+> rustc VERSION (released DATE) - output checked DATE - [Rust Playground](URL)
+````
+
+The blockquote renders muted, which is the point: provenance is needed but is
+not what the reader came for. Keep the fences bare -- wrapping the whole block
+in a blockquote would offset it more strongly, at the cost of `> ` on every
+line and source no longer copyable out of a checkout.
+
+Both dates earn their place by answering different questions. The **released**
+date belongs to the compiler that produced the output quoted here. The
+**checked** date is when someone last confirmed the link still produces it, and
+is what tells a later reader how stale the live half has gone.
 
 The version stamp is **required, and reviewers check for it**. Without it a
 reader who clicks through to different output cannot tell whether rustc moved

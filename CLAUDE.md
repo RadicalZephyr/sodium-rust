@@ -263,12 +263,21 @@ Which of two homes depends on what the experiment needs:
   must *fail* to compile cannot be a research binary, because a binary that does
   not compile breaks the workspace build.
 
-A Playground record carries three things: the link (live convenience), the
-source in a code block (the frozen record — what the ADR argued from), and **the
-rustc version the quoted output came from**. That version stamp is required and
-is checked in review. `version=stable` in a share link is a channel, not a
-version, so the link drifts; without the stamp a reader cannot tell whether
-rustc moved or the record was wrong.
+A Playground record is four parts in a fixed order: a bolded label saying what
+it demonstrates, the source in a code block, its output in a `text` block, and
+a provenance line as a blockquote beneath them —
+
+```text
+> rustc VERSION (released DATE) - output checked DATE - [Rust Playground](URL)
+```
+
+Keep the fences bare; the blockquote is only the provenance line, which renders
+muted. Both dates are load-bearing: the released date belongs to the compiler
+that produced the quoted output, the checked date is when the link was last
+confirmed to still produce it. **The version stamp is required and is checked in
+review** — `version=stable` is a channel, not a version, so the link drifts, and
+without the stamp a reader cannot tell whether rustc moved or the record was
+wrong. ADR-0001 carries the worked example.
 
 An experiment is maintained while the decision it serves is still being argued
 or built, and leaves the moment that decision is done — which the record dates
