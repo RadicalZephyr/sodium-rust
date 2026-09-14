@@ -194,12 +194,13 @@ generates no diagnostics of its own -- no macros, nothing that shapes an error
 message -- so pinning rustc's wording is outside what it promises, and evidence
 near-certain to break buys nothing a Playground link does not.
 
-**A share link is live, not frozen**, which is why a Playground record carries
-three artifacts rather than one. `version=stable` in the URL is a channel, not a
-version, so the link re-runs against whatever stable is current when it is
+**A share link is live, not frozen**, which is why a Playground record is
+written as four parts rather than one. `version=stable` in the URL is a channel,
+not a version, so the link re-runs against whatever stable is current when it is
 clicked. The link is convenience, the code block is the frozen record, and the
 rustc version that produced the quoted output is what makes the record
-falsifiable later.
+falsifiable later. The shape those parts take is below, and
+[`README.md`](README.md) states it as the rule.
 
 That last requirement came from being bitten. On 2026-09-10 a `compile_fail`
 case in `tests/ui/` failed locally while CI was green: rustc 1.94.1 (2026-03-25)
