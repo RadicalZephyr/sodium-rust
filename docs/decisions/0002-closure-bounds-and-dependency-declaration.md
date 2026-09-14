@@ -15,6 +15,7 @@
 `docs/decisions/` existed; the record was written on 2026-09-14 from
 [the pull request](https://github.com/RadicalZephyr/sodium-rust/pull/30),
 [the issue it closes](https://github.com/RadicalZephyr/sodium-rust/issues/14),
+[the upstream thread that issue descends from](https://github.com/SodiumFRP/sodium-rust/issues/48),
 the commit messages, the `THEORY` write-up that shipped in
 `tests/closure_type_inference.rs` -- now a pointer to this record rather than a
 second copy of it -- and the diff. So the log runs backwards, and the rule that
@@ -28,18 +29,38 @@ two and a half years is the author's, given while the record was being written.*
 
 ## Context
 
-[Issue #14](https://github.com/RadicalZephyr/sodium-rust/issues/14), opened on
-2024-03-03 under the title *Type boilerplate makes it look like Java*, is where
-this starts:
+This starts upstream, in
+[SodiumFRP/sodium-rust#48](https://github.com/SodiumFRP/sodium-rust/issues/48),
+and it starts as an aside in a thread about something else. That issue, opened
+2020-06-19, is about whether the `IsLambda*` traits should be bounded on `Fn`
+rather than `FnMut`. On 2020-07-14 the inference problem arrives in it:
+
+> I also think there is another breaking change that could result in a
+> significant improvement in using Sodium. I believe the `IsLambda*` traits block
+> type inferencing from working as it normally does when passing closures to
+> functions that use those traits as a bound.
+
+That is the conclusion of this record, four years before anything confirmed it
+and six before anything acted on it. What follows in that thread, argued between
+RadicalZephyr and clinuxrulz over about a week, is most of the *Alternatives*
+section below -- including the design that eventually shipped. It ends
+unresolved.
+
+[Issue #14](https://github.com/RadicalZephyr/sodium-rust/issues/14), opened
+2024-03-03 in this fork under the title *Type boilerplate makes it look like
+Java*, restates it as a complaint rather than an aside:
 
 > There is quite a lot of syntactic overhead in writing Sodium code, especially
 > when compared to the very small amounts of actual working code. One of the
 > major contributors to this is needing to annotate the types on the closures
 > passed to all the combinator methods.
 
-It was filed as a pain point and put on the 3.0 milestone, which is the part
-worth noticing: this was expected to cost a major version before anyone knew
-what the fix was. The complaint is also not about inference as such. It is about
+It was filed as a pain point and put on the 3.0 milestone -- a budget set in the
+2020 thread, where clinuxrulz had already ruled that "any changes to the existing
+API will be changing the 1st number in the version", and concluded: "No choice
+but to go v3 for inference. Which is OK with me, inference improves readability."
+So a major version was the agreed price four years before the fix existed. The
+complaint is also not about inference as such. It is about
 a ratio -- ceremony to working code -- and that is the thing to keep in view,
 because it is what decides between the alternatives further down. Two designs
 can both restore inference and still differ on what they charge a reader.
@@ -201,42 +222,94 @@ needed. `infers_even_when_body_only_constrains_an_associated_type` in
 [`tests/closure_type_inference.rs`](../../tests/closure_type_inference.rs) is that
 case, now passing with no annotation at all.
 
-## Why the diagnosis took two and a half years
+## Why this took six years
 
-The hypothesis was right on the first day. A comment on issue #14, posted a
-minute after the issue itself on 2024-03-03:
+Nobody had to think of the answer. clinuxrulz proposed it on 2020-07-14, in the
+shape it eventually shipped:
+
+> Another option to keep dependency tracking and type inference is to make twins
+> for all the API methods. E.g.
+>
+> ```rust
+> fn map<FN:Fn(A)->B>(&self, fn: FN) -> Stream<B>
+> fn map_w_deps<FN:Fn(A)->B>(&self, fn: FN, deps: Vec<Dep>) -> Stream<B>
+> ```
+>
+> Just a bit painful with all the boilerplate.
+
+That is the decision below, down to the `Vec<Dep>` parameter; only the name moved,
+`map_w_deps` to `map_with_deps`. Three days later he answered the implementation
+question too -- "It's just delegating the 'non with deps' method calls to the
+'with dep' ones carrying an empty `Vec` of deps" -- which is exactly what the base
+methods do today. Even the cost is his: *just a bit painful with all the
+boilerplate* is the 23 siblings, priced correctly on sight.
+
+So the six years are not a story about an idea nobody had. They are a story about
+an idea nobody could **choose**, because it was the expensive option on a list
+with two cheaper-looking ones and no way to eliminate either:
+
+- **`Fn(...) + Deps`** -- RadicalZephyr's proposal the same day: move `deps_op`
+  into a trait of its own and bound on the combination. One extra bound on the
+  methods that exist, instead of 23 new ones.
+- **`impl Fn for Lambda`** -- clinuxrulz's question the same day, "Will Rust let
+  us implement `Fn` or `FnMut` for our own types anyway? Such as `Lambda`?",
+  which would have dissolved the problem entirely.
+
+Both are settled under *Alternatives* below, by experiments that take five minutes
+and did not exist in 2020: one shows `Fn(...) + Deps` rejecting every
+deps-carrying call site, the other shows `impl Fn for Lambda` still behind a
+feature gate six years on.
+
+And the one thing the thread did establish empirically pointed away from the
+cause. clinuxrulz found the `&_` workaround on 2020-07-19 -- "This works: `let s2
+= s1.map(|x: &_| *x + 1);` It infers the type of `x`, but you still need to say it
+is a reference type" -- and drew the natural conclusion from it: "It means type
+inference should work fully (no type hints), if the `IsLambda` did not use `&` on
+its input types." That is wrong, and wrong in the direction that hides the
+problem. `&_` works because it supplies the *indirection* the pre-pass could not,
+not because the `&` in the bound was at fault; strip the `&` and the deduction
+still never fires through a non-`Fn` trait. The thread's only measurement made the
+bound look incidental, and the argument moved on to whether arguments should be
+passed by reference at all.
+
+RadicalZephyr closed the 2020 discussion there: "I think my thoughts on this API
+change are pretty half-baked right now, and not really grounded in how sodium is
+actually implemented currently."
+
+The 2024 comment on issue #14 is the same wall from the other side, posted a
+minute after the issue itself:
 
 > My current suspicion about what is causing the type inference to fail is the
 > `IsLambda*` traits. I haven't been able to successfully replace them in order
 > to prove this tho.
 
-That is the conclusion this record argues for, stated correctly, two and a half
-years early -- together with the reason it stayed a suspicion. The only
+Correct again, stalled again, and for the same reason both times: the only
 experiment in view was replacing the traits in the library, and replacing them
-*is* the change. So the cost of testing the hypothesis was the cost of acting on
-it, which is a bad position to reason from: you cannot afford to be wrong, so you
+*is* the change. The cost of testing the hypothesis was the cost of acting on it,
+which is a bad position to reason from -- you cannot afford to be wrong, so you
 do not try.
 
 What broke the deadlock is that the failure does not need the library at all. It
-reproduces in a trait declaration, a blanket impl and one call, which is the
-first experiment above. Once that costs five minutes, so does every follow-up:
-*is it the two impls overlapping?* *Would an extra bound fix it?* *What does the
+reproduces in a trait declaration, a blanket impl and one call, which is the first
+experiment above. Once that costs five minutes, so does every follow-up: *is it
+the two impls overlapping?* *Would an extra bound fix it?* *What does the
 deps-carrying call site do under that bound?* Each of those is a question the
-two-and-a-half-year version of this problem could not afford to ask, and each of
-them moved the argument -- the first ruled out the obvious alternative cause, and
-the other two are why the API was split in two rather than given a second bound.
+six-year version of this problem could not afford to ask, and each of them moved
+the argument -- the first ruled out the obvious alternative cause, and the other
+two are what finally made the twin-methods design choosable rather than merely
+available.
 
-None of that is visible in the commits; it comes from the author's account, given
-while this record was being written. The question was put fresh in 2026 and the
-standalone reproduction came back immediately, which is the whole of the
-difference between 2024 and 2026: the hypothesis did not improve, the cost of
-checking it collapsed.
+None of that last part is visible in the commits; it comes from the author's
+account, given while this record was being written. The question was put fresh in
+2026 and the standalone reproduction came back immediately, which is the whole of
+the difference between 2020 and 2026: the hypothesis did not improve and the
+design did not change, the cost of checking them collapsed.
 
 Which is [ADR-0001](0001-recording-important-decisions.md)'s argument for keeping
 research cheap and minimal, arrived at from the other end and before that record
 existed. This one is its first customer, and the evidence it needed turned out to
-be evidence nobody had been able to produce while the only available experiment
-was the change itself.
+be evidence nobody had been able to produce for six years, while the only
+available experiment was the change itself.
 
 ## Two costs the commits did not name
 
@@ -263,7 +336,9 @@ whether it was deliberate or an oversight.
 
 ## Decision
 
-Split the API by shape.
+Split the API by shape -- clinuxrulz's twin methods from 2020, built.
+
+
 
 - Every function-taking combinator is bounded on `FnMut`/`Fn` directly, so bare
   closures infer: `stream.map(|a| *a + 1)`.
@@ -292,8 +367,15 @@ permanent and paid per call site. It is also unbounded rather than fixed:
 `|a: &_|` is a floor, and the cases that need the full type are not signposted --
 you discover them by getting `E0282` and widening the annotation until it stops.
 
-**Add `+ FnMut(&A) -> B` to the existing bound.** This looks like a one-line fix,
-and the first half of it works. The second half is why it is not:
+**Keep a trait for the deps and put an `Fn`-family bound beside it.** This is the
+2020 thread's other proposal: separate `deps_op` into a `Deps` trait of its own,
+implement it for both `Lambda` and bare functions, and bound the combinators on
+`Fn(...) + Deps`. The reduction below tests the same shape in the form closest to
+what this crate actually had, `IsLambda1<A, B> + FnMut(&A) -> B`, because the
+question it settles -- what happens to `Lambda` when an `Fn`-family bound is in
+the list -- does not care which trait carries `deps_op` or how many there are. It is the cheap option -- one extra bound against 23 new
+methods -- and it went six years without anyone establishing whether it works. It
+half does. The first half works, which is what kept it alive:
 
 **Experiment -- the extra bound rescues the closure and rejects the `Lambda`**
 
@@ -374,11 +456,18 @@ One error, on the second call. The bare closure infers, so the extra bound does
 fix inference -- and the same bound rejects `Lambda<FN>`, which is a plain struct
 and cannot implement `FnMut` on stable. The one-line fix breaks every
 dependency-carrying call site, which is the only thing `IsLambda1` ever existed
-to accept.
+to accept. `Deps` as a separate trait changes nothing about this: whatever else
+is in the bound, `Fn(...)` is in it, and `Lambda` cannot satisfy it. The cheap
+option was never available, and five minutes at any point after 2020 would have
+said so.
 
-**Make `Lambda<FN>` implement `FnMut`.** This is the clean end state, and worth
-being precise about, because it is the alternative most likely to become
-available. It collapses the whole problem: with those impls, a single `FnMut`
+**Make `Lambda<FN>` implement `FnMut`.** clinuxrulz raised this on 2020-07-14 --
+"Will Rust let us implement `Fn` or `FnMut` for our own types anyway? Such as
+`Lambda`? Last time I tried, Rust would not let me" -- then found the `Fn` impls
+for `Box<dyn Fn>` added in Rust 1.35 and took them for general permission.
+RadicalZephyr corrected it three days later: those are impls *on* a std type, and
+writing your own is still gated. This is the clean end state, and worth being
+precise about, because it is the alternative most likely to become available. It collapses the whole problem: with those impls, a single `FnMut`
 bound accepts a bare closure and a `Lambda` alike, so there is no split and no
 `*_with_deps`. It needs `unboxed_closures` and `fn_traits`.
 
@@ -429,7 +518,10 @@ error[E0554]: `#![feature]` may not be used on the stable release channel
 
 Nothing is wrong with the implementation -- the same file compiles and runs on
 nightly 1.100.0 (2026-09-13, checked 2026-09-14). The gate is the whole
-objection, and a library whose MSRV is 1.71 cannot take it.
+objection, and a library whose MSRV is 1.71 cannot take it. Six years after
+RadicalZephyr wrote that it "doesn't really look like it's even ready to be
+stabilized any time soon", that assessment has held, which is the most useful
+thing this experiment says: the option is not arriving on its own.
 
 **Declare dependencies after construction**, as `stream.map(f).with_deps(...)`.
 Mechanically this is available: `Node::add_update_dependencies` exists and
@@ -452,20 +544,53 @@ inference through a macro is the thing we set out to fix, and a macro costs
 method-position completion, which is most of what makes a combinator library
 navigable.
 
+**A macro that works the deps out for itself.** The 2020 thread's most ambitious
+idea, and a better one than the above. clinuxrulz found that
+[`serde_closure_derive`](https://docs.rs/serde_closure_derive/0.3.1/src/serde_closure_derive/lib.rs.html)
+visits the variables a closure captures, on stable, and proposed
+`s1.map(lambda!(move |x| ca.sample() + x))` -- where `lambda!` discovers `ca`
+itself -- "Or even a `get_deps!` to use on regular closures and eliminate the need
+for `IsLambda`/`Lambda` altogether." He also filed the objection: "The example
+from serde seems quite complex. Worried if it would keep working as the Rust
+language changes over time."
+
+That objection is the one we would still make, and it is worth separating from
+the ergonomic one above, because this proposal does not lose inference the way a
+deps-passing macro does -- it takes an ordinary closure. What it costs is a
+proc-macro dependency and a correctness property that rests on pattern-matching
+closure syntax rather than on anything the language promises. A `Dep` that is
+wrong corrupts the collector's reference counting, so *silently* missing a capture
+is the worst failure this library has. We are not willing to buy ergonomics with
+it, and `*_with_deps` puts the same claim where a reviewer can see it. This is the
+alternative most worth revisiting if the capture-visiting technique ever gets a
+supported footing.
+
+**Derive the deps by watching reference counts.** clinuxrulz's other 2020 idea:
+"execute `clone` on a lambda, then work out which sodium objects just had their
+reference count increased." Recorded because it is genuinely clever and because
+it is the only proposal in that thread nobody answered. It needs a clone of the
+user's closure to be observable and side-effect-free, it sees only nodes held by
+strong count, and it would make dependency discovery a runtime property of a
+graph whose whole memory model is the collector getting these edges exactly
+right. Not pursued.
+
 ## Consequences
 
 **It is a breaking change, and a mechanical one.** `combinator(lambda1(f, deps))`
 stops compiling; the migration is `combinator_with_deps(f, deps)`, and it drops
 an annotation rather than adding one. `CHANGELOG.md` carries the before/after.
-The breakage was budgeted rather than discovered: issue #14 sat on the 3.0
-milestone from 2024, so a major version was already the expected price. The
-change is unreleased at the time of writing -- the crate is at 2.1.3 and the
-entry is under `Unreleased`.
+The breakage was budgeted rather than discovered, and budgeted early: clinuxrulz
+settled in the 2020 thread that a change to the existing API means a major
+version, issue #14 carried the 3.0 milestone from 2024, and the price was never
+in dispute at any point in between. The change is unreleased at the time of
+writing -- the crate is at 2.1.3 and the entry is under `Unreleased`.
 
 **The function-taking surface doubles.** 23 base methods gained 23 siblings, all
 of which appear in rustdoc, and `map` now sorts next to `map_to` and
-`map_with_deps`. This is a real cost and it lands on the reader of the
-documentation. Against issue #14's ratio, that is the trade we chose: ceremony
+`map_with_deps`. This is a real cost, it lands on the reader of the documentation,
+and it is the cost clinuxrulz named in the same breath as the design -- *just a
+bit painful with all the boilerplate*. Six years of looking for something cheaper
+did not turn one up. Against issue #14's ratio, that is the trade we chose: ceremony
 moves off the call sites, where it was charged to everyone on every closure, and
 onto the method index, where it is charged once to whoever is reading it -- and
 the alternative was charging every call site for a feature few call sites use.
@@ -548,6 +673,18 @@ there was a reportable rustc bug in there, distinct from the deduction behaviour
 documented above -- which is working as designed and not a bug at all. If anyone
 still has one of those error messages, it is worth a look before the memory of
 them goes.
+
+**What the 2020 thread was actually about.** Issue #48 opened on whether the
+combinators should be bounded on `Fn` rather than `FnMut`; closure inference was
+the aside that grew. This record settles the aside and leaves the original
+question, which is live work rather than an open question in the usual sense:
+[PR #34](https://github.com/RadicalZephyr/sodium-rust/pull/34) moves 38
+combinator bounds to `Fn` while the 8 listener bounds stay `FnMut`, and was open
+at the time of writing. It resolves #48 and deserves its own record -- it turns on
+a measurement, and on a counter-argument from the same 2020 thread that this one
+does not touch. Where the text above says a combinator is bounded on
+"`FnMut`/`Fn`", that describes `main` as of 2026-09-14, and #34 is the reason to
+check rather than trust it.
 
 **Whether stabilisation should collapse the API back.** If `unboxed_closures`
 and `fn_traits` stabilise, `Lambda<FN>` can implement `FnMut` and the 23 siblings
