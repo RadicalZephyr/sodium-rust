@@ -1634,3 +1634,101 @@ fn primes2() {
     }
     assert_memory_freed(sodium_ctx);
 }
+
+/// Run `f` on a worker thread and fail, rather than hang the suite, if
+/// it does not finish. Used by the re-entrancy tests below, where a
+/// regression manifests as a deadlock.
+fn run_with_timeout<T: Send + 'static>(secs: u64, f: impl FnOnce() -> T + Send + 'static) -> T {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let (tx, rx) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    let result = rx
+        .recv_timeout(Duration::from_secs(secs))
+        .expect("timed out: the operation deadlocked");
+    worker.join().unwrap();
+    result
+}
+
+/// A listener that sends into the very stream it is listening on used
+/// to deadlock: `Stream::_listen` held the stream's mutex across the
+/// call into user code, and `send` wants that same non-reentrant lock.
+///
+/// This is not an exotic case. It is what a GUI does every time a
+/// listener writes a value back to a widget and the widget re-emits
+/// the signal feeding the sink.
+///
+/// Not deadlocking is the point of this test. The re-entrant `2` is
+/// still not delivered, because the send lands inside the transaction
+/// that is already in flight and a stream fires at most once per
+/// transaction -- the same rule that makes two sends in one explicit
+/// transaction collapse to one firing. To chain an event off a
+/// listener, defer it with `SodiumCtx::post`, as the next test shows.
+#[test]
+fn send_from_within_listener_does_not_deadlock() {
+    init();
+    let seen = run_with_timeout(30, || {
+        let sodium_ctx = SodiumCtx::new();
+        let ss: StreamSink<i32> = sodium_ctx.new_stream_sink();
+        let out = Arc::new(Mutex::new(Vec::new()));
+
+        let l;
+        {
+            let out = out.clone();
+            let ss = ss.clone();
+            l = ss.stream().listen(move |a: &i32| {
+                out.lock().as_mut().unwrap().push(*a);
+                if *a == 1 {
+                    ss.send(2);
+                }
+            });
+        }
+
+        ss.send(1);
+        l.unlisten();
+
+        let lock = out.lock();
+        let seen: &Vec<i32> = lock.as_ref().unwrap();
+        seen.clone()
+    });
+
+    assert_eq!(vec![1], seen);
+}
+
+/// The supported way to feed an event back into the graph from a
+/// listener: defer it to after the current transaction closes.
+#[test]
+fn send_deferred_from_listener_with_post() {
+    init();
+    let seen = run_with_timeout(30, || {
+        let sodium_ctx = SodiumCtx::new();
+        let ss: StreamSink<i32> = sodium_ctx.new_stream_sink();
+        let out = Arc::new(Mutex::new(Vec::new()));
+
+        let l;
+        {
+            let out = out.clone();
+            let ss = ss.clone();
+            let sodium_ctx = sodium_ctx.clone();
+            l = ss.stream().listen(move |a: &i32| {
+                out.lock().as_mut().unwrap().push(*a);
+                if *a == 1 {
+                    let ss = ss.clone();
+                    sodium_ctx.post(move || ss.send(2));
+                }
+            });
+        }
+
+        ss.send(1);
+        l.unlisten();
+
+        let lock = out.lock();
+        let seen: &Vec<i32> = lock.as_ref().unwrap();
+        seen.clone()
+    });
+
+    assert_eq!(vec![1, 2], seen);
+}

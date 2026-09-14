@@ -51,6 +51,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Cell::map_with_deps`, `lift2_with_deps`..`lift6_with_deps`,
   `listen_with_deps`, `listen_weak_with_deps`.
 
+### Fixed
+
+- Sending into a stream from inside a listener registered on that same stream
+  no longer deadlocks. `Stream::_listen` held the stream's mutex across the call
+  into user code, and `send` needs that same non-reentrant lock, so the callback
+  blocked on itself forever.
+
+  GUI code hits this constantly: a listener writes a value to a widget, the
+  widget re-emits the signal that feeds the sink, and the send re-enters. The
+  firing value is now cloned out from under the lock before user code runs.
+
+  Note that the re-entrant event is still not delivered, because it lands inside
+  the transaction already in flight and a stream fires at most once per
+  transaction. To chain an event off a listener, defer it with
+  `SodiumCtx::post`.
+
 ## [2.1.3] - 2026-09-02
 
 ### Added

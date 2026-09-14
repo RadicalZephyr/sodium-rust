@@ -519,7 +519,10 @@ impl<A: Send + 'static> Stream<A> {
         &self,
         mut k: K,
         weak: bool,
-    ) -> Listener {
+    ) -> Listener
+    where
+        A: Clone,
+    {
         self.sodium_ctx().transaction(|| {
             let self_ = self.clone();
             let f_deps = lambda1_deps(&k);
@@ -527,11 +530,17 @@ impl<A: Send + 'static> Stream<A> {
                 &self.sodium_ctx(),
                 NodeName::STREAM_LISTEN,
                 move || {
-                    self_.with_data(|data: &mut StreamData<A>| {
-                        if let Some(firing) = &data.firing_op {
-                            k.call(firing)
-                        }
-                    });
+                    // Clone the firing value out from under the stream
+                    // lock before handing it to user code. Holding the
+                    // lock across `k.call` self-deadlocks as soon as the
+                    // callback sends into this same stream -- which is
+                    // exactly what a GUI does when a widget update
+                    // re-emits the signal that feeds the sink.
+                    let firing_op =
+                        self_.with_data(|data: &mut StreamData<A>| data.firing_op.clone());
+                    if let Some(firing) = &firing_op {
+                        k.call(firing)
+                    }
                 },
                 vec![self.box_clone()],
             );
@@ -541,11 +550,17 @@ impl<A: Send + 'static> Stream<A> {
         })
     }
 
-    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen_weak<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener
+    where
+        A: Clone,
+    {
         self._listen(k, true)
     }
 
-    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener {
+    pub fn listen<K: IsLambda1<A, ()> + Send + Sync + 'static>(&self, k: K) -> Listener
+    where
+        A: Clone,
+    {
         self._listen(k, false)
     }
 
