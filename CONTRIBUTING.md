@@ -31,18 +31,30 @@ cycle collector logs the whole graph it walks, node by node:
 RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 ```
 
-`tests/ui/` holds one `trybuild` case, and it is a *pass* case: it must compile,
-and it carries no expected output. Keep it that way. A `compile_fail` case pins
-rustc's diagnostic wording, which is not stable across releases and is not
-something this crate promises, so it turns the build red on any stable older
-than the one it was blessed against -- out of a diff the contributor did not
-write. The article in `expected a` versus `expected an` is a real example of how
-innocuous that failure looks.
-
-Reductions that demonstrate a compiler behaviour are evidence, not guards, and
-belong in the decision record that argues from them, as Playground experiments.
+`tests/ui/` is the `trybuild` suite, and what belongs in it turns on whose
+promise is being checked. A `compile_fail` case belongs there when the
+*rejection* is one of ours -- a closure shape this crate's bounds refuse, which
+is part of the API's contract and worth guarding. It does not belong there when
+it demonstrates a *compiler* behaviour. That is evidence for a decision rather
+than a guard on the library, and it goes in the record that argues from it, as a
+Playground experiment.
 [ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md) is
-the worked example.
+the worked example: its reductions lived in `tests/ui/` until that record gave
+them somewhere better, which is why only the pass case is left today.
+
+Any `compile_fail` case carries expected rustc output, which is not stable across
+releases, so it goes behind the `#[rustversion::stable]` gate in `tests/ui.rs` --
+CI runs beta and nightly as well. That gate does not cover an *older* stable, so
+a contributor whose toolchain predates the one the snapshots were blessed against
+gets a red build out of a diff they did not write. It is a real cost and each
+case has to be worth it.
+
+After a deliberate change to a diagnostic, re-bless with `TRYBUILD=overwrite
+cargo test --test ui` -- and only after a deliberate change. A mismatch you did
+not cause means your toolchain is not the stable these were blessed against, so
+run `rustup check` first: blessing on an older rustc commits its wording and
+turns CI red, in a diff that looks innocuous. The article in `expected a` versus
+`expected an` is a real example.
 
 Tests run against stable, beta and nightly; nightly is allowed to fail. The
 toolchain matrix runs on Linux -- macOS and Windows get stable only, to catch

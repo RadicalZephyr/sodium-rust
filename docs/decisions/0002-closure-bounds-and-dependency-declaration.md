@@ -629,10 +629,14 @@ of the original change.*
 The first three reductions above shipped with the change as `compile_fail` cases
 under `tests/ui/` -- four files, since trybuild needs the two halves of the
 `+ FnMut` argument split into a passing case and a failing one, where a
-Playground needs only the one file. They were never regression guards. Nothing
-this library promises has the form "rustc rejects this program", and their own
-comments said as much -- they were there to keep the reasoning checked rather
-than merely asserted. That is the definition of evidence, and
+Playground needs only the one file. They were never regression guards. A
+`compile_fail` case guards something when the rejection is ours to make -- a
+closure shape this crate's bounds refuse is part of the contract, and worth
+pinning. These four reject nothing of ours. They establish that rustc's closure
+signature deduction does not look through a user-defined trait, which is a fact
+about the compiler that holds whatever this library does, and their own comments
+said as much: they were there to keep the reasoning checked rather than merely
+asserted. That is the definition of evidence, and
 [ADR-0001](0001-recording-important-decisions.md) says where evidence goes and
 why trybuild is the wrong home for it: a `compile_fail` case pins diagnostic
 wording we neither control nor promise, and `rustversion` gating excludes beta
@@ -650,7 +654,10 @@ The fourth experiment, on `fn_traits`, is new: it was a claim in a commit messag
 with nothing behind it, and it is the claim in this record most likely to expire.
 `tests/ui/bare_closures.rs` stays: it exercises every function-taking combinator
 with an unannotated closure from outside the crate, which is a property we do
-promise, and it carries no expected output, so it runs on every channel.
+promise, and it carries no expected output, so it runs on every channel. The
+`#[rustversion::stable]` gate the reductions needed stays too, empty, because the
+distinction above is between kinds of case rather than a ban -- a case that pins
+a rejection this crate promises still needs somewhere gated to sit.
 
 ## Open questions
 
