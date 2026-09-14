@@ -37,6 +37,14 @@ useful thing in this document.
    overhead, not work -- so parallelising it divides the wrong quantity.
 5. **`simple_threaded_mode` does not parallelise anything.** It spawns one
    thread around the whole dependency loop and immediately joins.
+6. **Predeclared conflict sets are a real design point, not a shortcut** --
+   they are the C2PL half of the best-published scheduler, abort-free by
+   construction, and bounded by three things: unpredictable reads, `switch`,
+   and set-granularity conflict detection (§1.2). Measured conservativeness
+   runs 2.3x to 12x depending on graph shape (§2.4).
+7. **Component-level parallelism is already available** -- two `SodiumCtx`
+   instances on two threads are fully independent and behave correctly today
+   (§2.5).
 
 ## 1. What the literature says
 
@@ -72,14 +80,33 @@ in ScalaSTM and wraps each transaction in `atomic{...}`:
 That last clause is doing a lot of work. They had to *restrict the benchmark
 suite* to make the STM variant measurable at all.
 
-**Their algorithm is pessimistic, not optimistic.** MV-RP (also called FullMV)
-combines conservative two-phase locking for reevaluations with multi-version
-concurrency control for reads. Transactions are ordered in a stored
-serialization graph as late as the constraints allow. A read that would violate
-the established order is served an older version rather than causing an abort.
-Dynamic dependency changes -- the `switch_s`/`switch_c` case -- are handled by
-what they call *retrofitting*: the edge insertion is allowed to commit and the
-ordering is repaired, rather than aborting the transaction that made it.
+**Their algorithm is pessimistic, not optimistic, and it is three mechanisms
+rather than one.** This decomposition matters, because each part is a design
+choice that could be made separately:
+
+- **C2PL** -- conservative two-phase locking. A change-propagation transaction
+  declares, before it runs, every node it could reevaluate, by traversing
+  forward from the inputs that are about to change. Declared-up-front locking
+  never deadlocks and never aborts. §1.2 takes this apart on its own.
+- **MVCC** -- multi-version concurrency control, which is where the name MV-RP
+  comes from. Each node keeps a backlog of past values. Reads that arrive
+  "late" relative to the serialization order are served an older version
+  instead of aborting; reads that arrive "early" block until C2PL releases the
+  version they need.
+- **Retrofitting** -- their own contribution, for dynamic dependency edges.
+  The edge insertion is allowed to commit and the serialization order is
+  repaired afterwards, rather than aborting the transaction that made it.
+
+Transactions are ordered in a stored serialization graph, as late as the
+constraints allow. The asymmetry that forces all three is idempotence:
+
+> Because reads are idempotent, MVCC can execute reads "in the past" by
+> returning old values from the backlog if necessary (while reads "in the
+> future" are blocked until C2PL releases the corresponding version). [...]
+> Since writes are not idempotent, they cannot be executed in the past, meaning
+> the combination of C2PL for reevaluations and MVCC for reads is
+> **indispensable** for providing abort-free strict serializable execution for
+> both kinds of operations.
 
 **The numbers.** These are the ones worth carrying around:
 
@@ -109,7 +136,105 @@ achieves parallelism still loses to `synchronized` when updates are cheap. That
 is not a criticism of the work -- the authors say so themselves and are clear
 about where the approach pays. It is the central datum for us.
 
-### 1.2 Glitch freedom is not serializability
+### 1.2 Predeclared conflict sets
+
+C2PL is worth separating out from FullMV, because it is a coherent design on
+its own and the one most likely to be reinvented from first principles. The
+shape is: for each input, compute the set of nodes a transaction from that
+input could possibly touch; have each running transaction hold its set; admit a
+new transaction to run in parallel if its set is disjoint from every set
+currently held. No versions, no rollback, one set intersection per admission
+decision.
+
+The appeal is real and it is not naive. It is **abort-free by construction**,
+which §1.1 establishes is what the reactive setting actually requires; the
+analysis is pure graph shape, so it caches per input and invalidates only when
+the topology changes; and the paper describes exactly this traversal:
+
+> C2PL [...] provides abort-free strict serializability, but only if
+> transactions can declare required resources prior to execution. Change
+> propagation transactions (triggered by `update(...)` calls) can traverse the
+> DG from all inputs that are about to change to reach all nodes that will be
+> potentially reevaluated. Hence, C2PL can be used during `update(...)` calls
+> to protect the execution of reevaluations. **However, C2PL alone is not
+> enough** to ensure abort-free strict serializability of update transactions
+> due to reads and dynamic edge changes, as we elaborate next.
+
+Three things bound it. The paper names two.
+
+**Reads target nodes no forward traversal can predict.** This is worse in our
+API than in theirs. `Cell::sample` (`src/impl_/cell.rs:206`) takes the cell's
+own data lock and returns the value:
+
+```rust
+pub fn sample(&self) -> A where A: Clone {
+    self.with_data(|data: &mut CellData<A>| data.value.run())
+}
+```
+
+No transaction, no node, no participation in anyone's declared set. Imperative
+code on one thread sampling a cell that another thread's transaction is
+updating is a genuine conflict that reachability analysis cannot see, because
+the reader has no input to traverse forward from. This is what forces MVCC.
+
+**Dynamic edges break the guarantee rather than merely needing recomputation.**
+It is tempting to think `switch` gives a precise point at which to recompute
+the set. Recomputation is not the problem; timing is. C2PL's freedom from
+deadlock rests entirely on all-or-nothing acquisition *before* execution. A
+`switch_s` firing mid-propagation adds an edge to a node the running
+transaction did not declare and another transaction may already hold. The
+options are to abort (the thing the design existed to avoid, and unsound with
+side effects), to acquire late (reintroducing the deadlock C2PL bought away),
+or to declare the transitive closure over all possible switch targets (for
+`switch_c` over a dynamically constructed cell of cells, unbounded). The
+paper's answer is a third mechanism, not a patch to C2PL:
+
+> Like reads though, the scheduler cannot predict the source nodes of edge
+> changes ahead of time, and therefore **C2PL is inapplicable, too**.
+
+Retrofitting works by rewriting history in the serialization graph, which is
+possible only because the order is a data structure it can edit. Locks already
+held cannot be retroactively un-held.
+
+The database literature hit the identical wall. [Calvin][calvin] requires
+transactions to predeclare read and write sets so that deterministic locking
+can order them without a distributed commit protocol. For transactions whose
+set depends on values read, it falls back to **OLLP** (optimistic lock location
+prediction): run the transaction unreplicated as a reconnaissance query to
+discover the likely set, re-issue it with that set declared, then verify at
+lock-acquisition time that the read set has not changed -- and retry if it has.
+Predeclaration plus speculation plus retry. The retry is the abort the design
+was trying to avoid, and it arrives by a longer road.
+
+**The third limit, which the paper has no need to state, is granularity.** A
+predeclared-set scheduler decides at the granularity of the whole set: if two
+sets intersect in one node out of fifty, the transactions serialize completely.
+FullMV's per-node version histories buy **pipeline parallelism** -- one
+transaction working downstream while another works upstream, ordering only
+where they actually meet. That is structurally unavailable to a design that
+decides admission from a set intersection. It matters because most real FRP
+applications funnel into a rendered output that every transaction reaches, so
+set-granularity detection answers "serialize" on precisely the applications
+worth speeding up. The paper's own benchmark shows this: they had to *delete*
+the summing signal chain from the dining-philosophers application to get any
+scaling, because it was the node every transaction reached.
+
+Set against each other:
+
+| | precision | abort-free | handles `switch` |
+| --- | --- | --- | --- |
+| Static predeclaration (C2PL alone) | coarse, set-granular | yes | no |
+| Dynamic optimistic (STM) | precise | **no** | yes |
+| C2PL + MVCC + retrofitting (MV-RP) | precise, node-granular | yes | yes, via a third mechanism |
+
+The middle row is the one to notice. Predeclaration is *less precise* than
+optimistic rollback, and that is a real cost -- §2.4 measures it at 2.3x to 12x
+depending on graph shape. But precision is not the axis that decides soundness
+here. Rollback is not merely dynamic-instead-of-static; with side-effecting
+closures and no effect system it is incorrect. A coarse abort-free scheduler
+and a precise aborting one are not two points on one scale.
+
+### 1.3 Glitch freedom is not serializability
 
 Blackheath's argument opens with "an FRP engine knows all the dependencies and
 data flows in the FRP logic, so it can be guaranteed to give the right answer
@@ -137,7 +262,7 @@ standard taxonomy for the surrounding design space -- push versus pull,
 lifting, multidirectionality, glitch avoidance, distribution -- and is a
 reasonable orientation document for anyone coming to this cold.
 
-### 1.3 Determinism without rollback
+### 1.4 Determinism without rollback
 
 Two lines of work get concurrency safety without ever aborting anything, which
 is the property the reactive setting actually needs.
@@ -177,7 +302,7 @@ become inconsistent. The catch is the precondition: operations on shared state
 must be **undoable and commutative**. That is a constraint Rust's type system
 cannot express and our `FnMut` bounds do not impose.
 
-### 1.4 Weakening the semantics on purpose
+### 1.5 Weakening the semantics on purpose
 
 The design the quote does not consider is making concurrency opt-in at a named
 place rather than inferred everywhere.
@@ -193,7 +318,7 @@ This is the honest version of the trade, and it is the one most compatible with
 a library whose semantics are mandated rather than chosen: it does not weaken
 Sodium's guarantees, it adds a place where a user can explicitly decline them.
 
-### 1.5 STM proper
+### 1.6 STM proper
 
 If we do pursue the STM route, these are the reference points.
 
@@ -232,7 +357,7 @@ erratum.
 `Arc` from a `TVar` read so the clone is deferred until mutation.
 `swym-htm` exposes raw x86-64 HTM primitives, with the caveat above.
 
-### 1.6 Adjacent work worth knowing about
+### 1.7 Adjacent work worth knowing about
 
 - **[Parallel Functional Reactive Programming][pfrp]** (Peterson, Trifonov and
   Serjantov, PADL 2000) is the historical first attempt, extending FRP to
@@ -418,6 +543,65 @@ spawn and one join of pure overhead per node, and a chain of blocked threads at
 depth. CLAUDE.md describes it as "thread per fan-out", which is the intent
 rather than the code.
 
+### 2.4 How conservative a static conflict set is
+
+§1.2's bound is qualitative; this is the number. Walking `dependents` forward
+from a sink gives the static set. Counting user closures actually invoked gives
+the work. A sink fanning out to `K` filtered branches, exactly one of which
+passes, each branch `depth` nodes long behind its filter:
+
+| K | depth | static set | actual work | ratio |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 | 1 | 7 | 3 | 2.3x |
+| 4 | 1 | 13 | 5 | 2.6x |
+| 8 | 1 | 25 | 9 | 2.8x |
+| 8 | 4 | 49 | 12 | 4.1x |
+| 8 | 16 | 145 | 24 | 6.0x |
+| 16 | 16 | 289 | 32 | 9.0x |
+| 32 | 16 | 577 | 48 | 12.0x |
+
+Unbounded in graph shape, and the shape that drives it is worth naming
+precisely: **every filter on the path runs regardless**, because a predicate
+has to be evaluated to learn that it prunes. Pruning saves only what is
+*downstream* of a failing filter. So conservativeness is driven by
+depth-behind-filters, not by filter count -- a wide shallow fan-out stays cheap
+and a narrow deep one does not.
+
+The false conflict is also real rather than theoretical. Two sinks joined by an
+`or_else`, with a filter gating one of the two paths into the shared node:
+
+```text
+static set from sink A     : 4
+static set from sink B     : 4
+static intersection        : 2
+```
+
+A scheduler admitting on set disjointness serializes these two transactions
+even on an event that the filter stops well short of the shared node.
+
+### 2.5 The partitioned case already works, today
+
+Where a graph genuinely decomposes into components sharing no nodes, there is
+nothing for a scheduler to do -- those are two graphs, and Sodium already
+supports running them independently, because `SodiumCtx` instances share no
+state. Each has its own `gc_ctx`, its own data mutex, its own counters.
+
+Unlike the single shared context of §2.1, two contexts on two threads behave
+correctly:
+
+```text
+B: about to send
+B fired 2              <-- propagated immediately, while A's transaction is open
+B: send returned
+A fired 1
+A transaction done
+```
+
+So the zero-conflict case costs nothing and needs no new machinery. What a
+scheduler would add over `SodiumCtx::new()` twice is only the *partially*
+overlapping case -- which is worth keeping in view when weighing the
+complexity, since it is a smaller increment than it first appears.
+
 ## 3. Reading the proposal against all of this
 
 ### Where it holds
@@ -449,7 +633,9 @@ a closure that fails to terminate on a torn snapshot -- the opacity problem.
 
 **Two different parallelisms are conflated.** The quote describes
 **inter-transaction** parallelism -- many transactions at once -- which is the
-hard case and the one STM and MVCC address. The tractable case is
+hard case, and the one STM, MVCC and the predeclared sets of §1.2 all
+address -- three different answers, of which only the last needs no versioning
+machinery and only the first is unsound here. The tractable case is
 **intra-transaction** parallelism: one transaction, fanned out across the
 graph's antichains. That needs no STM at all, because within a transaction the
 dependency graph *is* the schedule and each node writes only its own state.
@@ -463,7 +649,7 @@ not. Our design is the harder one to parallelise, not the easier one, and the
 
 **The efficiency argument runs backwards.** My first guess was that our node
 updates would sit orders of magnitude below the 160 µs break-even. They do not:
-a 16-node update costs ~60 µs, within 3× of it. But that is the wrong reading,
+a 16-node update costs ~60 µs, within 3x of it. But that is the wrong reading,
 and the correct one is the useful finding in this report.
 
 The 160 µs figure is a threshold on **user computation** -- the quantity
@@ -496,7 +682,14 @@ worth doing.
    scheduler must contend on. The OOPSLA numbers say thread-safe scheduling
    costs ~25% single-threaded; paying that on top of a runtime fifteen
    allocations deep is paying twice.
-3. **If parallelism is still wanted: intra-transaction, pessimistic, and
+3. **Reach for the free parallelism first.** If an application's graph
+   partitions, give each partition its own `SodiumCtx` (§2.5). And before
+   building any scheduler, run the reachability walk of §2.4 over a real
+   application graph and take the pairwise intersections between its inputs.
+   That measures the available parallelism directly. If every pair meets at
+   the renderer, the answer is that there is none, and the measurement costs
+   an afternoon rather than a rewrite.
+4. **If parallelism is still wanted: intra-transaction, pessimistic, and
    benchmarked against a global lock as the baseline that must be beaten.**
    The literature's verdict on optimistic rollback in this setting is not that
    it is difficult but that it is unsound in the presence of side effects --
@@ -506,12 +699,15 @@ worth doing.
 ## 5. What this report does not settle
 
 - **Whether there is a workload that wants this at all.** Everything above is
-  about feasibility. None of it establishes demand.
+  about feasibility. None of it establishes demand. The reachability walk in
+  Experiment 5 would answer it against a real application graph, which is the
+  cheapest next thing anyone could do here; the synthetic topologies in §2.4
+  only establish that the measurement discriminates.
 - **Whether the Concurrent Revisions correspondence survives `switch_c`.** The
   fork/join-with-deterministic-merge shape maps suspiciously well onto
   transactions and `merge`. I did not chase it, and dynamic topology is where
   such correspondences usually break.
-- **Whether opt-in async (§1.4) is acceptable here.** If explicit annotation is
+- **Whether opt-in async (§1.5) is acceptable here.** If explicit annotation is
   allowed, the design space collapses dramatically and the STM question mostly
   goes away. If parallelism must be automatic to be worth having, it does not.
 - **Where pre-ADR experiments live.** The four experiments below produce
@@ -530,8 +726,9 @@ worth doing.
 
 ## Reproducing the measurements
 
-Each block is a standalone integration test. Drop it in `tests/`, run the given
-command, delete it.
+Experiments 1-4 and 6 are standalone integration tests: drop each in `tests/`,
+run the given command, delete it. Experiment 5 needs crate-internal access to
+walk the node graph, so it goes in `src/tests.rs` instead.
 
 ### Experiment 1 -- transaction boundaries merge across threads
 
@@ -759,6 +956,157 @@ fn heap_allocations_per_update() {
 }
 ```
 
+### Experiment 5 -- how conservative a static conflict set is
+
+Append to `src/tests.rs` (it reaches `crate::impl_`, so it cannot live in
+`tests/`). Run with
+`cargo test --lib tests::static_reachability_experiment -- --nocapture`.
+
+```rust
+mod static_reachability_experiment {
+    use crate::impl_::node::IsNode;
+    use crate::{SodiumCtx, Stream};
+    use std::collections::HashSet;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// Forward-reachable set from a node, over `dependents`. This is the
+    /// static, shape-only analysis: it cannot see which filters will prune.
+    fn static_reachable(start: &dyn IsNode) -> HashSet<usize> {
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut stack: Vec<Box<dyn IsNode + Send + Sync>> = vec![start.box_clone()];
+        while let Some(n) = stack.pop() {
+            if !seen.insert(Arc::as_ptr(n.data()) as usize) {
+                continue;
+            }
+            let dependents = n.data().dependents.read();
+            for w in dependents.iter() {
+                if let Some(d) = w.upgrade() {
+                    stack.push(d);
+                }
+            }
+        }
+        seen
+    }
+
+    fn sweep(k: u64, depth: usize) -> (usize, usize) {
+        let ctx = SodiumCtx::new();
+        let sink = ctx.new_stream_sink::<u64>();
+        let ran = Arc::new(AtomicUsize::new(0));
+        let mut branches: Vec<Stream<u64>> = Vec::new();
+        for i in 0..k {
+            let r = ran.clone();
+            let mut br = sink.stream().filter(move |v: &u64| {
+                r.fetch_add(1, Ordering::Relaxed);
+                v % k == i
+            });
+            for _ in 0..depth {
+                let r = ran.clone();
+                br = br.map(move |v: &u64| {
+                    r.fetch_add(1, Ordering::Relaxed);
+                    v + 1
+                });
+            }
+            branches.push(br);
+        }
+        let mut merged = branches[0].clone();
+        for b in &branches[1..] {
+            merged = merged.or_else(b);
+        }
+        let mut sum = 0u64;
+        let _l = merged.listen(move |v: &u64| sum = sum.wrapping_add(*v));
+        let static_set = static_reachable(&sink.stream().impl_).len();
+        ran.store(0, Ordering::Relaxed);
+        sink.send(3);
+        (static_set, ran.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn how_conservative_is_the_static_set() {
+        println!("{:>4} {:>6} {:>10} {:>12} {:>8}", "K", "depth", "static", "actual work", "ratio");
+        for &(k, d) in &[(2u64, 1usize), (4, 1), (8, 1), (8, 4), (8, 16), (16, 16), (32, 16)] {
+            let (st, dy) = sweep(k, d);
+            println!("{:>4} {:>6} {:>10} {:>12} {:>7.1}x", k, d, st, dy, st as f64 / dy as f64);
+        }
+    }
+
+    #[test]
+    fn two_sinks_false_conflict() {
+        let ctx = SodiumCtx::new();
+        let a = ctx.new_stream_sink::<u64>();
+        let b = ctx.new_stream_sink::<u64>();
+
+        // Both sinks statically reach `shared`, but a filter gates A's path.
+        let shared = a
+            .stream()
+            .filter(|v: &u64| v % 2 == 0)
+            .or_else(&b.stream().map(|v: &u64| v + 100));
+        let mut sum = 0u64;
+        let _l = shared.listen(move |v: &u64| sum = sum.wrapping_add(*v));
+
+        let sa = static_reachable(&a.stream().impl_);
+        let sb = static_reachable(&b.stream().impl_);
+        let overlap: HashSet<_> = sa.intersection(&sb).collect();
+
+        println!("static set from sink A     : {}", sa.len());
+        println!("static set from sink B     : {}", sb.len());
+        println!("static intersection        : {}", overlap.len());
+        println!("  -> a scheduler using static sets must SERIALIZE these two");
+        println!("  send an odd value on A: it is filtered out, so A's");
+        println!("  transaction never actually touches the shared node.");
+    }
+}
+```
+
+### Experiment 6 -- separate contexts do not interfere
+
+`cargo test --test scratch -- --nocapture`
+
+```rust
+use sodium_rust::SodiumCtx;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
+/// Two *separate* SodiumCtx instances, one per thread. If contexts are truly
+/// independent, thread A holding a transaction open must not affect thread B.
+#[test]
+fn separate_contexts_do_not_interfere() {
+    let out: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let out_a = out.clone();
+    let t = thread::spawn(move || {
+        let ctx = SodiumCtx::new();
+        let sink = ctx.new_stream_sink::<i32>();
+        let o = out_a.clone();
+        let _l = sink
+            .stream()
+            .listen(move |v: &i32| o.lock().unwrap().push(format!("A fired {}", v)));
+        ctx.transaction(|| {
+            sink.send(1);
+            thread::sleep(Duration::from_millis(300));
+        });
+        out_a.lock().unwrap().push("A transaction done".into());
+    });
+
+    thread::sleep(Duration::from_millis(100));
+    let ctx_b = SodiumCtx::new();
+    let sink_b = ctx_b.new_stream_sink::<i32>();
+    let o = out.clone();
+    let _lb = sink_b
+        .stream()
+        .listen(move |v: &i32| o.lock().unwrap().push(format!("B fired {}", v)));
+    out.lock().unwrap().push("B: about to send".into());
+    sink_b.send(2);
+    out.lock().unwrap().push("B: send returned".into());
+
+    t.join().unwrap();
+    for line in out.lock().unwrap().iter() {
+        println!("{}", line);
+    }
+}
+```
+
 ## Bibliography
 
 **Reactive runtimes and concurrency**
@@ -802,6 +1150,14 @@ fn heap_allocations_per_update() {
 - Intel. [TSX Memory Ordering Issue / deprecation notice][tsx].
 - Rust: [`stm`][stmcrate].
 
+**Deterministic databases and predeclared sets**
+
+- Thomson, Diamond, Weng, Ren, Shao & Abadi. [Fast Distributed Transactions and
+  Strongly Consistent Replication for OLTP Database Systems][calvin] (Calvin;
+  TODS 2014), for predeclared read/write sets and OLLP.
+- Bernstein, Hadzilacos & Goodman, *Concurrency Control and Recovery in
+  Database Systems* (1986), the source FullMV cites for both C2PL and MVCC.
+
 **Incremental and dataflow**
 
 - Anderson et al. [Efficient Parallel Self-Adjusting Computation][psac], and
@@ -841,5 +1197,6 @@ fn heap_allocations_per_update() {
 [td]: https://github.com/TimelyDataflow/timely-dataflow
 [dd]: https://github.com/TimelyDataflow/differential-dataflow
 [baconrajan]: https://link.springer.com/chapter/10.1007/3-540-45337-7_12
+[calvin]: http://www.cs.umd.edu/~abadi/papers/calvin-tods14.pdf
 [contributing]: ../../CONTRIBUTING.md
 [issue47]: https://github.com/RadicalZephyr/sodium-rust/issues/47
