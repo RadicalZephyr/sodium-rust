@@ -174,11 +174,25 @@ Two things about that arrangement are decisions rather than mechanics.
 **The Playground constraint is a feature.** A Playground cannot depend on this
 crate, so anything that fits in one is necessarily a minimal reproduction. It is
 also the only route open to a compile-time experiment, because a binary that
-does not compile breaks the workspace build. Verified against trybuild 1.0.121:
-a `compile_fail` case with no `.stderr` file does not assert "failed to compile,
-reason unimportant" -- it writes to `wip/` and panics the run (`src/run.rs`, the
-`created_wip` branch). Pinning the exact diagnostic wording is not incidental to
-that technique, it *is* the technique.
+does not compile breaks the workspace build.
+
+The alternative is `trybuild`, which this repository already runs for
+`tests/ui/`, and which we turned down for ADR evidence. A `compile_fail` case is
+written against rustc's diagnostics, and those are explicitly not stable across
+releases, so such a test asserts something we neither control nor set out to
+promise. The technique offers no way to opt out of that: verified against
+trybuild 1.0.121, a `compile_fail` case with no `.stderr` file does not mean
+"failed to compile, reason unimportant" -- it writes to `wip/` and panics the
+run (`src/run.rs`, the `created_wip` branch). Pinning the exact wording is not
+incidental to that technique, it *is* the technique.
+
+The cost of that lands on contributors rather than on CI. `rustversion` gating
+excludes beta and nightly but not an *older* stable, so a contributor whose
+toolchain predates the one the files were blessed against gets a red build out
+of a diff they did not write. This crate declares `rust-version = "1.71"` and
+generates no diagnostics of its own -- no macros, nothing that shapes an error
+message -- so pinning rustc's wording is outside what it promises, and evidence
+near-certain to break buys nothing a Playground link does not.
 
 **A share link is live, not frozen**, which is why a Playground record carries
 three artifacts rather than one. `version=stable` in the URL is a channel, not a
