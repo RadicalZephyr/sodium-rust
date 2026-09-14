@@ -1,0 +1,287 @@
+diff --git a/docs/decisions/research/src/bin/0002-lock-count.rs b/docs/decisions/research/src/bin/0002-lock-count.rs
+new file mode 100644
+index 0000000..6227f73
+--- /dev/null
++++ b/docs/decisions/research/src/bin/0002-lock-count.rs
+@@ -0,0 +1,70 @@
++//! How many locks one `send` acquires, and which phase acquires them.
++//!
++//! This binary travels with `patches/lock-count.patch` rather than living in
++//! `src/bin/`, because it reads `sodium_rust::lock_counters` -- a counter that
++//! patch introduces. A binary here that does not compile against the unpatched
++//! library would break `cargo test --workspace`.
++//!
++//! ```shell
++//! git apply docs/decisions/research/patches/lock-count.patch
++//! cargo run --release -p adr-research --bin 0002-lock-count
++//! git apply -R docs/decisions/research/patches/lock-count.patch
++//! ```
++//!
++//! The split between propagation and the collector is the point. ADR-0002
++//! quotes it to explain why a token scoped to the cycle collector alone would
++//! collect most of the lock traffic but only a third of the win.
++
++use std::hint::black_box;
++use std::sync::atomic::Ordering;
++
++use sodium_rust::{lock_counters, SodiumCtx, Stream, StreamSink};
++
++fn main() {
++    println!(
++        "{:<8} {:>8} {:>13} {:>13} {:>13} {:>15}",
++        "depth", "updated", "locks/send", "propagation", "collector", "locks/update"
++    );
++
++    for depth in [1usize, 4, 16, 64] {
++        let updated = depth + 2;
++        let ctx = SodiumCtx::new();
++        let sink: StreamSink<i32> = ctx.new_stream_sink();
++        let mut stream: Stream<i32> = sink.stream();
++        for _ in 0..depth {
++            stream = stream.map(|a: &i32| a.wrapping_add(1));
++        }
++        let _listener = stream.listen(|a: &i32| {
++            black_box(a);
++        });
++
++        // Warm up: the first sends build up the collector's root buffer, and
++        // we want the steady state.
++        for i in 0..200 {
++            sink.send(black_box(i));
++        }
++
++        lock_counters::PROPAGATION.store(0, Ordering::Relaxed);
++        lock_counters::COLLECTOR.store(0, Ordering::Relaxed);
++        lock_counters::COUNTING.store(true, Ordering::Relaxed);
++        let sends = 200u64;
++        for i in 0..sends {
++            sink.send(black_box(i as i32));
++        }
++        lock_counters::COUNTING.store(false, Ordering::Relaxed);
++
++        let propagation = lock_counters::PROPAGATION.load(Ordering::Relaxed) as f64 / sends as f64;
++        let collector = lock_counters::COLLECTOR.load(Ordering::Relaxed) as f64 / sends as f64;
++        let total = propagation + collector;
++
++        println!(
++            "{:<8} {:>8} {:>13.1} {:>13.1} {:>13.1} {:>15.1}",
++            depth,
++            updated,
++            total,
++            propagation,
++            collector,
++            total / updated as f64
++        );
++    }
++}
+diff --git a/src/impl_/cell.rs b/src/impl_/cell.rs
+index 7f8ffc5..fd77130 100644
+--- a/src/impl_/cell.rs
++++ b/src/impl_/cell.rs
+@@ -18,8 +18,8 @@ use crate::impl_::stream::Stream;
+ use crate::impl_::stream::StreamWeakForwardRef;
+ use crate::impl_::stream::WeakStream;
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::counting_lock::Mutex;
++use crate::impl_::counting_lock::RwLock;
+ use std::mem;
+ use std::sync::atomic::Ordering;
+ use std::sync::Arc;
+diff --git a/src/impl_/cell_loop.rs b/src/impl_/cell_loop.rs
+index add94cc..2a76208 100644
+--- a/src/impl_/cell_loop.rs
++++ b/src/impl_/cell_loop.rs
+@@ -3,7 +3,7 @@ use crate::impl_::lazy::Lazy;
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::stream_loop::StreamLoop;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::counting_lock::Mutex;
+ use std::mem;
+ use std::sync::Arc;
+ 
+diff --git a/src/impl_/counting_lock.rs b/src/impl_/counting_lock.rs
+new file mode 100644
+index 0000000..9d60e41
+--- /dev/null
++++ b/src/impl_/counting_lock.rs
+@@ -0,0 +1,53 @@
++//! A measurement device: parking_lot wrappers that count acquisitions,
++//! split between the propagation phase and the cycle collector.
++use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
++
++pub static IN_COLLECTOR: AtomicBool = AtomicBool::new(false);
++pub static COUNTING: AtomicBool = AtomicBool::new(false);
++pub static PROPAGATION: AtomicUsize = AtomicUsize::new(0);
++pub static COLLECTOR: AtomicUsize = AtomicUsize::new(0);
++
++#[inline]
++fn tick() {
++    if COUNTING.load(Ordering::Relaxed) {
++        if IN_COLLECTOR.load(Ordering::Relaxed) {
++            COLLECTOR.fetch_add(1, Ordering::Relaxed);
++        } else {
++            PROPAGATION.fetch_add(1, Ordering::Relaxed);
++        }
++    }
++}
++
++pub struct Mutex<T: ?Sized>(parking_lot::Mutex<T>);
++
++impl<T> Mutex<T> {
++    pub fn new(v: T) -> Self {
++        Mutex(parking_lot::Mutex::new(v))
++    }
++}
++
++impl<T: ?Sized> Mutex<T> {
++    pub fn lock(&self) -> parking_lot::MutexGuard<'_, T> {
++        tick();
++        self.0.lock()
++    }
++}
++
++pub struct RwLock<T: ?Sized>(parking_lot::RwLock<T>);
++
++impl<T> RwLock<T> {
++    pub fn new(v: T) -> Self {
++        RwLock(parking_lot::RwLock::new(v))
++    }
++}
++
++impl<T: ?Sized> RwLock<T> {
++    pub fn read(&self) -> parking_lot::RwLockReadGuard<'_, T> {
++        tick();
++        self.0.read()
++    }
++    pub fn write(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
++        tick();
++        self.0.write()
++    }
++}
+diff --git a/src/impl_/gc_node.rs b/src/impl_/gc_node.rs
+index 62ff9d0..4de5906 100644
+--- a/src/impl_/gc_node.rs
++++ b/src/impl_/gc_node.rs
+@@ -1,7 +1,7 @@
+ #![allow(clippy::only_used_in_recursion)]
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::counting_lock::Mutex;
++use crate::impl_::counting_lock::RwLock;
+ use std::cell::Cell;
+ use std::collections::HashSet;
+ use std::fmt::Write as _;
+diff --git a/src/impl_/lazy.rs b/src/impl_/lazy.rs
+index c07155f..24c6998 100644
+--- a/src/impl_/lazy.rs
++++ b/src/impl_/lazy.rs
+@@ -1,4 +1,4 @@
+-use parking_lot::Mutex;
++use crate::impl_::counting_lock::Mutex;
+ use std::sync::Arc;
+ 
+ /// A representation for a value that may not be available until the
+diff --git a/src/impl_/listener.rs b/src/impl_/listener.rs
+index d6f0885..a38fc55 100644
+--- a/src/impl_/listener.rs
++++ b/src/impl_/listener.rs
+@@ -3,7 +3,7 @@ use crate::impl_::node::{IsNode, Node};
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::sodium_ctx::SodiumCtxData;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::counting_lock::Mutex;
+ use std::fmt;
+ use std::sync::Arc;
+ 
+diff --git a/src/impl_/mod.rs b/src/impl_/mod.rs
+index 8e23d37..b8a78cf 100644
+--- a/src/impl_/mod.rs
++++ b/src/impl_/mod.rs
+@@ -3,6 +3,7 @@
+ pub mod cell;
+ pub mod cell_loop;
+ pub mod cell_sink;
++pub mod counting_lock;
+ pub mod dep;
+ pub mod enum_;
+ pub mod gc_node;
+diff --git a/src/impl_/node.rs b/src/impl_/node.rs
+index 5918658..6afd786 100644
+--- a/src/impl_/node.rs
++++ b/src/impl_/node.rs
+@@ -1,4 +1,4 @@
+-use parking_lot::RwLock;
++use crate::impl_::counting_lock::RwLock;
+ use std::collections::HashMap;
+ use std::collections::HashSet;
+ use std::fmt;
+diff --git a/src/impl_/sodium_ctx.rs b/src/impl_/sodium_ctx.rs
+index 201ba9e..c6c2935 100644
+--- a/src/impl_/sodium_ctx.rs
++++ b/src/impl_/sodium_ctx.rs
+@@ -4,7 +4,7 @@ use crate::impl_::node::{
+     box_clone_vec_is_node, box_clone_vec_is_weak_node, IsNode, IsWeakNode, Node,
+ };
+ 
+-use parking_lot::Mutex;
++use crate::impl_::counting_lock::Mutex;
+ use std::mem;
+ use std::sync::atomic::AtomicUsize;
+ use std::sync::atomic::Ordering;
+@@ -291,7 +291,9 @@ impl SodiumCtx {
+         });
+         if allow_collect_cycles {
+             // gc
+-            self.collect_cycles()
++            crate::impl_::counting_lock::IN_COLLECTOR.store(true, Ordering::Relaxed);
++            self.collect_cycles();
++            crate::impl_::counting_lock::IN_COLLECTOR.store(false, Ordering::Relaxed);
+         }
+     }
+ 
+diff --git a/src/impl_/stream.rs b/src/impl_/stream.rs
+index 210135e..1839e5f 100644
+--- a/src/impl_/stream.rs
++++ b/src/impl_/stream.rs
+@@ -11,8 +11,8 @@ use crate::impl_::sodium_ctx::SodiumCtxData;
+ use crate::impl_::stream_loop::StreamLoop;
+ use crate::impl_::stream_sink::StreamSink;
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::counting_lock::Mutex;
++use crate::impl_::counting_lock::RwLock;
+ use std::sync::atomic::Ordering;
+ use std::sync::Arc;
+ use std::sync::Weak;
+diff --git a/src/impl_/stream_loop.rs b/src/impl_/stream_loop.rs
+index ecab84b..14a865a 100644
+--- a/src/impl_/stream_loop.rs
++++ b/src/impl_/stream_loop.rs
+@@ -3,7 +3,7 @@ use crate::impl_::node::IsNode;
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::stream::Stream;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::counting_lock::Mutex;
+ use std::sync::Arc;
+ 
+ use super::name::NodeName;
+diff --git a/src/lib.rs b/src/lib.rs
+index a94eb27..22a8520 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -17,6 +17,8 @@ mod transaction;
+ pub use self::cell::Cell;
+ pub use self::cell_loop::CellLoop;
+ pub use self::cell_sink::CellSink;
++#[doc(hidden)]
++pub use self::impl_::counting_lock as lock_counters;
+ pub use self::impl_::dep::Dep;
+ pub use self::impl_::enum_::Enum2;
+ pub use self::impl_::enum_::Enum3;
