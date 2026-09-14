@@ -31,15 +31,18 @@ cycle collector logs the whole graph it walks, node by node:
 RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 ```
 
-The `compile_fail` cases under `tests/ui/` carry expected rustc output, which
-is not stable across releases. After a deliberate change to a diagnostic,
-re-bless them with `TRYBUILD=overwrite cargo test --test ui`.
+`tests/ui/` holds one `trybuild` case, and it is a *pass* case: it must compile,
+and it carries no expected output. Keep it that way. A `compile_fail` case pins
+rustc's diagnostic wording, which is not stable across releases and is not
+something this crate promises, so it turns the build red on any stable older
+than the one it was blessed against -- out of a diff the contributor did not
+write. The article in `expected a` versus `expected an` is a real example of how
+innocuous that failure looks.
 
-Only after a deliberate change, though. A mismatch you did not cause means your
-toolchain is not the stable these were blessed against -- run `rustup check`
-before reaching for `overwrite`, because blessing on an older rustc commits its
-wording and turns CI red. The diff looks harmless when it happens: the article
-in `expected a`/`expected an` is a real example.
+Reductions that demonstrate a compiler behaviour are evidence, not guards, and
+belong in the decision record that argues from them, as Playground experiments.
+[ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md) is
+the worked example.
 
 Tests run against stable, beta and nightly; nightly is allowed to fail. The
 toolchain matrix runs on Linux -- macOS and Windows get stable only, to catch

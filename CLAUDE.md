@@ -32,18 +32,15 @@ RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 cycle collector logs the whole graph it is walking, node by node, with the
 `NodeName`s from `src/impl_/name.rs` attached.
 
-The `compile_fail` cases under `tests/ui/` carry expected rustc output, which is
-not stable across releases. After a deliberate change to a diagnostic:
-
-```shell
-TRYBUILD=overwrite cargo test --test ui
-```
-
-Only after a deliberate change. A mismatch you did not cause means your
-toolchain is not the stable these were blessed against — run `rustup check`
-first. Blessing on an older rustc commits its wording and turns CI red, and the
-diff looks innocuous: the article in `expected a`/`expected an` is a real
-example.
+`tests/ui/` holds one `trybuild` case and it is a *pass* case, carrying no
+expected output. Do not add a `compile_fail` case: it pins rustc's diagnostic
+wording, which is not stable across releases and is not something this crate
+promises, so it turns the build red on any stable older than the one it was
+blessed against. A reduction that demonstrates a compiler behaviour is evidence
+rather than a guard, and belongs in the decision record arguing from it, as a
+Playground experiment —
+[ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md) is
+the worked example.
 
 Benchmarks are Criterion, and the causal profiler is a separate workload with
 its own setup — see [`coz-driver/README.md`](coz-driver/README.md):
@@ -158,10 +155,12 @@ under both.
 - `tests/closure_type_inference.rs` — the closure ergonomics guarantee, from
   outside the crate. `infers_*` uses bare unannotated closures; `with_deps_*`
   covers the explicit-`Dep` siblings.
-- `tests/ui/` via `tests/ui.rs` — the same guarantee at compile time, plus
-  reduced repros of the *old* failure so the reasoning stays checked rather
-  than merely asserted. The `compile_fail` cases are gated to stable with
-  `rustversion`.
+- `tests/ui/bare_closures.rs` via `tests/ui.rs` — the same guarantee at compile
+  time, from outside the crate. One `trybuild` pass case, no expected output, so
+  it runs on every channel. The reductions of the *old* failure used to sit
+  beside it as `compile_fail` cases; they are evidence rather than guards and
+  now live in
+  [ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md).
 - `#[ignore = "ADR-NNNN: ..."]` tests in `src/tests.rs` — known gaps between
   what Sodium's denotational semantics require and what this implementation
   does. They are meant to fail; see the ADR conventions below before adding
