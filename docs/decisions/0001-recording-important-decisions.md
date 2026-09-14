@@ -1,11 +1,13 @@
 # 0001 -- Recording important decisions
 
 <details>
-<summary><strong>Status:</strong> Draft</summary>
+<summary><strong>Status:</strong> Implemented 2026-09-14</summary>
 
 | Date | Transition |
 | --- | --- |
 | 2026-09-10 | Drafted |
+| 2026-09-14 | Accepted |
+| 2026-09-14 | Implemented |
 
 </details>
 
