@@ -554,16 +554,136 @@ for `IsLambda`/`Lambda` altogether." He also filed the objection: "The example
 from serde seems quite complex. Worried if it would keep working as the Rust
 language changes over time."
 
-That objection is the one we would still make, and it is worth separating from
-the ergonomic one above, because this proposal does not lose inference the way a
-deps-passing macro does -- it takes an ordinary closure. What it costs is a
-proc-macro dependency and a correctness property that rests on pattern-matching
-closure syntax rather than on anything the language promises. A `Dep` that is
-wrong corrupts the collector's reference counting, so *silently* missing a capture
-is the worst failure this library has. We are not willing to buy ergonomics with
-it, and `*_with_deps` puts the same claim where a reviewer can see it. This is the
-alternative most worth revisiting if the capture-visiting technique ever gets a
-supported footing.
+His objection stands, and this proposal deserves better than the one above it: it
+does not lose inference the way a deps-passing macro does, because it takes an
+ordinary closure. The reason to turn it down is elsewhere, and is not the one we
+expected. We assumed a capture visitor would fail *loudly* -- it yields
+identifiers rather than types, so a closure capturing an ordinary `i32` alongside
+a cell would emit `offset.to_dep()` and not compile. That is wrong twice over.
+
+**Experiment -- a capture visitor filters correctly and still misses the node**
+
+```rust
+use std::sync::{Arc, Mutex};
+
+#[derive(Clone, Debug, PartialEq)]
+struct Dep(&'static str);
+
+#[derive(Clone)]
+struct Cell(Arc<&'static str>);
+
+impl Cell {
+    fn new(name: &'static str) -> Cell {
+        Cell(Arc::new(name))
+    }
+    fn to_dep(&self) -> Dep {
+        Dep(*self.0)
+    }
+    fn sample(&self) -> &'static str {
+        *self.0
+    }
+}
+
+// A capture visitor yields identifiers, not types, so the code it emits has to
+// decide per capture whether that identifier is a node. Inherent methods beat
+// trait methods, which gives the filter on stable: `Cell` takes the inherent
+// `dep`, everything else falls through to the trait.
+struct Probe<T>(T);
+
+impl<'a> Probe<&'a Cell> {
+    fn dep(&self) -> Option<Dep> {
+        Some(self.0.to_dep())
+    }
+}
+
+trait NotANode {
+    fn dep(&self) -> Option<Dep>;
+}
+
+impl<T> NotANode for Probe<T> {
+    fn dep(&self) -> Option<Dep> {
+        None
+    }
+}
+
+/// Stands in for `lambda!`. The bracketed list is what a capture visitor finds:
+/// the free identifiers of the closure body. Deps are collected before the
+/// closure is built, since building it moves the captures.
+macro_rules! lambda {
+    ([$($cap:ident),* $(,)?] $f:expr) => {{
+        let deps: Vec<Dep> = {
+            let mut d = Vec::new();
+            $( if let Some(x) = Probe(&$cap).dep() { d.push(x); } )*
+            d
+        };
+        ($f, deps)
+    }};
+}
+
+fn main() {
+    let ca = Cell::new("ca");
+    let cb = Cell::new("cb");
+    let hidden = Cell::new("hidden");
+    let offset = 100i32;
+
+    // 1. Two cells named directly -- the `switch_c` shape.
+    let (a, b) = (ca.clone(), cb.clone());
+    let (picks, picks_deps) =
+        lambda!([a, b] move |left: bool| if left { a.sample() } else { b.sample() });
+
+    // 2. A cell alongside an ordinary captured value.
+    let c = ca.clone();
+    let (biased, biased_deps) = lambda!([c, offset] move |n: i32| (c.sample(), n + offset));
+
+    // 3. The same dependency, one shared handle away.
+    let registry: Arc<Mutex<Vec<Cell>>> = Arc::new(Mutex::new(vec![hidden.clone()]));
+    let (looks_up, looks_up_deps) =
+        lambda!([registry] move |i: usize| registry.lock().unwrap()[i].sample());
+
+    println!("picks    [a, b]     -> {:?}", picks_deps);
+    println!("biased   [c, offset] -> {:?}", biased_deps);
+    println!("looks_up [registry] -> {:?}", looks_up_deps);
+    println!();
+    println!("picks(true) = {}", picks(true));
+    println!("biased(1)   = {:?}", biased(1));
+    println!("looks_up(0) = {}", looks_up(0));
+}
+```
+
+```text
+picks    [a, b]     -> [Dep("ca"), Dep("cb")]
+biased   [c, offset] -> [Dep("ca")]
+looks_up [registry] -> []
+
+picks(true) = ca
+biased(1)   = ("ca", 101)
+looks_up(0) = hidden
+```
+
+> rustc 1.98.1 (released 2026-09-01) - output checked 2026-09-14 - [Rust Playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=d4660d00360181b937d49c7dc7fd3f5f)
+
+Filtering by type is not the obstacle: an inherent method beats a trait method, so
+`Probe` sorts nodes from ordinary captures on stable with no specialization
+feature, and the mixed case compiles and reports exactly the one real dependency.
+The obstacle is the third line. `looks_up` reaches `hidden` -- the output below it
+says so -- and the visitor reports nothing, because the identifier it can see is
+`registry`, and `registry` is not a node.
+
+Which is the same failure, in the same place, as the refcount experiment below:
+one layer of sharing between the closure and the node, and the node is invisible.
+That is not a coincidence, and it is the useful thing this record can say about
+automatic dependency discovery. **Whether a closure reaches a node is a property
+of what its handles point at, which is neither a syntactic property of the
+closure's text nor a shallow property of its captures.** A capture visitor reads
+the text. A refcount delta reads one level of `Arc::clone`. Both answer a question
+adjacent to the one that matters, and both answer it confidently.
+
+So we are not willing to buy ergonomics with a mechanism that silently
+under-reports, when a `Dep` that is wrong corrupts the collector's reference
+counting. `*_with_deps` makes the same mistake possible, puts it at the call site
+where a reviewer reads it, and claims nothing about completeness. Worth revisiting
+only if capture analysis gains a supported footing *and* a way to see through
+indirection -- and the second is the hard half.
 
 **Derive the deps by watching reference counts.** clinuxrulz's other 2020 idea,
 and the only proposal in that thread nobody answered:
@@ -685,8 +805,9 @@ unclonable. And a strong count is global state, so a concurrent clone or drop of
 the same node between the two reads changes the answer -- these bounds are
 `Send + Sync` and `ThreadedMode` exists to make the evaluator concurrent.
 
-Worth revisiting only if dependency discovery moves somewhere it can see through
-indirection, which refcount deltas cannot by construction.
+Worth revisiting only under the same condition as the capture-visiting macro
+above, and for the same structural reason: dependency discovery would have to see
+through indirection, which a refcount delta cannot do by construction.
 
 ## Consequences
 
@@ -764,11 +885,12 @@ still failed `fn_bound_rejects_lambda` on the article in `expected a` versus
 `expected an`.
 
 So the reductions move here, as Playground experiments, and leave the test suite.
-Two of the experiments are new. The one on `fn_traits` was a claim in a commit
+Three of the experiments are new. The one on `fn_traits` was a claim in a commit
 message with nothing behind it, and is the claim in this record most likely to
-expire. The one on refcount deltas answers a 2020 proposal that nobody answered
-at the time, which is the other thing a record is for: a rejected alternative
-stays rejected only while the reason is on file.
+expire. The two on automatic dependency discovery answer 2020 proposals
+that nobody answered at the time -- one of them by contradicting what this record
+first assumed about it -- which is the other thing a record is for: a rejected
+alternative stays rejected only while the reason is on file and checkable.
 `tests/ui/bare_closures.rs` stays: it exercises every function-taking combinator
 with an unannotated closure from outside the crate, which is a property we do
 promise, and it carries no expected output, so it runs on every channel. The
