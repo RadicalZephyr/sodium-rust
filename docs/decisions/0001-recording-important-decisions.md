@@ -40,6 +40,18 @@ the test suite, where they have been failing for reasons unrelated to this
 library ever since. That is the concrete failure this record is trying not to
 repeat.
 
+> **2026-09-14 (after the decision):** those artifacts are gone.
+> [ADR-0002](0002-closure-bounds-and-dependency-declaration.md) reconstructs the
+> change that produced them, and moving its reductions into that record as
+> Playground experiments left `tests/ui/` holding only the pass case that guards
+> a property we do promise. `cargo test --test ui` is green on an older stable
+> again. Worth noting because it was not the plan: this record was written to
+> stop the next change from stranding its prototyping that way, and the fix for
+> the stranded prototyping turned out to be applying the rule to the change that
+> prompted it. A record with somewhere to put evidence can absorb evidence that
+> already exists, which is an argument for writing one late rather than not at
+> all.
+
 ## Decision
 
 Decisions live in `docs/decisions/`, one record per file, and they are **living

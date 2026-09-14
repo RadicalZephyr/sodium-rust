@@ -21,10 +21,10 @@ second copy of it -- and the diff. So the log runs backwards, and the rule that
 the last row is the current state does not hold here; the summary line is. That
 is the honest reading of a record written after the fact, and we are deliberately
 not generalising it: [`README.md`](README.md)'s rule stands, because writing
-records late is not something we plan to do again. Three arguments below are not
-recovered from those sources -- the reading of why the diagnosis stalled for two
-and a half years, the discoverability inversion, and the cross-port divergence --
-and each is marked where it appears.*
+records late is not something we plan to do again. Three things below come from
+outside those sources and are marked where they appear: two are this record's own
+reading of the API it replaced, and the account of why the diagnosis stalled for
+two and a half years is the author's, given while the record was being written.*
 
 ## Context
 
@@ -217,15 +217,20 @@ experiment in view was replacing the traits in the library, and replacing them
 it, which is a bad position to reason from: you cannot afford to be wrong, so you
 do not try.
 
-What broke the deadlock -- this record's reading, not anything the commits say --
-is that the failure does not need the library at all. It reproduces in a trait
-declaration, a blanket impl and one call, which is the first experiment above.
-Once that costs five minutes, so does every follow-up: *is it the two impls
-overlapping?* *Would an extra bound fix it?* *What does the deps-carrying call
-site do under that bound?* Each of those is a question the two-and-a-half-year
-version of this problem could not afford to ask, and each of them moved the
-argument -- the first ruled out the obvious alternative cause, and the other two
-are why the API was split in two rather than given a second bound.
+What broke the deadlock is that the failure does not need the library at all. It
+reproduces in a trait declaration, a blanket impl and one call, which is the
+first experiment above. Once that costs five minutes, so does every follow-up:
+*is it the two impls overlapping?* *Would an extra bound fix it?* *What does the
+deps-carrying call site do under that bound?* Each of those is a question the
+two-and-a-half-year version of this problem could not afford to ask, and each of
+them moved the argument -- the first ruled out the obvious alternative cause, and
+the other two are why the API was split in two rather than given a second bound.
+
+None of that is visible in the commits; it comes from the author's account, given
+while this record was being written. The question was put fresh in 2026 and the
+standalone reproduction came back immediately, which is the whole of the
+difference between 2024 and 2026: the hypothesis did not improve, the cost of
+checking it collapsed.
 
 Which is [ADR-0001](0001-recording-important-decisions.md)'s argument for keeping
 research cheap and minimal, arrived at from the other end and before that record
