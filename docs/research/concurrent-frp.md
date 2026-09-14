@@ -51,6 +51,10 @@ useful thing in this document.
    (Experiment 7, filed as [#48][issue48]). This is single-threaded and has
    nothing to do with concurrency, but it undermines the vocabulary the rest
    of this report reasons in -- see §5.
+9. **`Cell::sample()` supplies no time**, where the semantics require one, so a
+   concurrent sampler observes cell pairs that exist at no time `t`
+   ([#49][issue49]). This is the concrete instance of §1.2's "unpredictable
+   reads", and the reason predeclared conflict sets cannot cover reads.
 
 ## 1. What the literature says
 
@@ -182,6 +186,13 @@ No transaction, no node, no participation in anyone's declared set. Imperative
 code on one thread sampling a cell that another thread's transaction is
 updating is a genuine conflict that reachability analysis cannot see, because
 the reader has no input to traverse forward from. This is what forces MVCC.
+
+It is not hypothetical. Appendix E gives `Sample` a time argument
+(`Sample :: Cell a -> T -> a`) and says the public interface must only allow it
+"through `Reactive`"; ours supplies none, and a sampler thread running against a
+propagating writer observes pairs of cells that exist at no time `t` -- 2,264
+glitches in 4.4 million samples, filed as [#49][issue49]. Java Sodium's
+`sample()` wraps `Transaction.apply(...)` and does not have this.
 
 **Dynamic edges break the guarantee rather than merely needing recomputation.**
 It is tempting to think `switch` gives a precise point at which to recompute
@@ -719,10 +730,27 @@ mechanism is `end_of_transaction` raising `transaction_depth` before the
 propagation loop (`src/impl_/sodium_ctx.rs:235`) and lowering it after (`:264`);
 an unwind skips the decrement and the counter never reaches zero again.
 
-So "transaction" here means a *simultaneity batch*, not an all-or-nothing unit.
-§1.3 already records that glitch freedom is strictly weaker than
-serializability -- and then the rest of this report scores against
-serializability anyway. The gap between the two is exactly where FullMV's
+The primary source is blunter than that reading. Appendix E has **no
+transaction primitive at all** -- sixteen primitives, and the word does not
+appear among them. What other languages call a transaction is simply the time
+argument:
+
+> `Reactive` is a helper monad that's equivalent to `Reader T`. It represents a
+> computation that's executed at a particular instant in time. [...] Most
+> languages don't support monads, so they instead use a concept of
+> transactions, but the meaning is the same.
+
+A transaction *is* a value of `T`. Not a simultaneity batch, not an atomicity
+boundary -- an instant. Nor is there any effect anywhere in the specification:
+`Execute` is named as though it carries one, but `Reactive` is `Reader T`, so
+`occs (Execute s) = map (\(t, ma) -> (t, run ma t)) (occs s)` is pure like the
+rest. Failure is only ever a value (`⊥`), never a control-flow event, which is
+what [#48][issue48] turns on.
+
+So the database vocabulary was never the right frame. §1.3 already records
+that glitch freedom is strictly weaker than serializability -- and then the
+rest of this report scores against serializability anyway. The gap between
+the two is exactly where FullMV's
 expensive machinery lives: the stored serialization graph, the version
 histories and retrofitting all exist to deliver the stronger property. If
 Sodium owes only glitch freedom plus a well-defined simultaneity relation,
@@ -1230,6 +1258,16 @@ works normally. The damage is context-wide and permanent, not node-local.
 
 ## Bibliography
 
+**Primary source**
+
+- Blackheath & Jones. *Functional Reactive Programming* (Manning, 2016),
+  Appendix E, "Denotational semantics of Sodium", revision 1.1. The executable
+  version is at
+  [SodiumFRP/sodium/denotational](https://github.com/SodiumFRP/sodium/blob/master/denotational/).
+  §5 and [#48][issue48] both turn on reading it directly; the companion note
+  [`node-language.md`](node-language.md) works through what it assumes of the
+  host language.
+
 **Reactive runtimes and concurrency**
 
 - Drechsler, Mogk, Salvaneschi & Mezini. [Thread-Safe Reactive
@@ -1322,3 +1360,4 @@ works normally. The damage is context-wide and permanent, not node-local.
 [contributing]: ../../CONTRIBUTING.md
 [issue47]: https://github.com/RadicalZephyr/sodium-rust/issues/47
 [issue48]: https://github.com/RadicalZephyr/sodium-rust/issues/48
+[issue49]: https://github.com/RadicalZephyr/sodium-rust/issues/49
