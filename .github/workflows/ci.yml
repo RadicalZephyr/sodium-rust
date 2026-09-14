@@ -114,4 +114,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # Advisories cover every workspace member, not just the published
+      # `sodium-rust` closure: a vulnerable or unmaintained dependency of
+      # `coz-driver` or `adr-research` is still code a developer runs locally,
+      # so not publishing it is no reason to skip it. The nightly `Security
+      # Audit` checks the same graph; this one catches it before merge.
       - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
+          arguments: --all-features --workspace
+
+      # Licenses, bans and sources cover only what we redistribute. cargo-deny
+      # already leaves dev-dependencies out of the license check by default,
+      # and the members are out for the same reason -- nothing in them ships.
+      # Widening this to `--workspace` would fail on compatible-but-unlisted
+      # licenses in code nobody receives: `coz` is BSD-2-Clause-Views, which is
+      # compatible with BSD-3-Clause but absent from the allow list.
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check bans licenses sources
+          arguments: --all-features
