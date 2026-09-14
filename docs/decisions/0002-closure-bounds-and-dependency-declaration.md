@@ -679,12 +679,14 @@ the one that matters, and both answer it confidently.
 
 That rules out these two techniques. It does not rule out automatic discovery,
 and an earlier draft of this record let the first slide into the second. The
-property being sought is reachability through arbitrary data, and the answer the
-Rust GC ecosystem converged on is a `Trace` trait: every type declares how to find
-the collector's pointers inside it, recursively, with a derive for the common case
--- [`ferris_gc::Trace`](https://docs.rs/ferris-gc/latest/ferris_gc/trait.Trace.html)
+answer the Rust GC ecosystem converged on is a `Trace` trait: every type declares
+how to find the collector's pointers inside it, recursively, with a derive for the
+common case --
+[`ferris_gc::Trace`](https://docs.rs/ferris-gc/latest/ferris_gc/trait.Trace.html)
 is one of several (checked 2026-09-14). Recursion is the thing both techniques
-above lack, and neither can be patched into having it.
+above lack, and neither can be patched into having it. How far that recursion
+actually reaches is a separate question, and the answer is not *arbitrary data*;
+it is in *Open questions*.
 
 We already have the visitor half. `src/impl_/gc_node.rs` declares
 
@@ -945,20 +947,69 @@ still has one of those error messages, it is worth a look before the memory of
 them goes.
 
 **Whether closure captures should be traced rather than declared.** `Dep` is a
-manual, depth-one trace for the one boundary the collector's visitor cannot cross,
-and the ecosystem's answer to the general problem -- a `Trace` trait plus a derive
--- recurses, so it does not have the blind spot both experiments above found.
-Adapting it here is not a small change, and at least three questions come first. A
-trait cannot be implemented for an anonymous closure type, so the closure would
-have to be desugared into a named struct with typed fields -- the capture-visiting
-macro again, this time doing something it can actually do. Our nodes are
-`Arc`-backed and the graph is full of `parking_lot` locks while the collector runs
-at the end of the outermost transaction, so tracing *through* a lock is a deadlock
-question rather than a traversal one; it is worth establishing whether the
-ecosystem's `Trace` impls cover `Arc`, `Mutex` and `RwLock` at all, or stop at
-owned containers for exactly that reason. And a trace that misses an edge frees
-live data, so whether such a trait is `unsafe` is a real decision rather than a
-style one.
+manual, depth-one trace for the one boundary the collector's visitor cannot
+cross, and the obvious upgrade is the ecosystem's: a `Trace` trait plus a derive,
+recursing through a capture's *type* instead of stopping at its name. It is a
+real improvement, and it does not reach as far as it first appears.
+
+A trait cannot be implemented for an anonymous closure type, so the closure would
+still have to be desugared into a named struct with typed fields -- the
+capture-visiting macro again, this time doing something it can actually do.
+
+The larger obstacle is where the recursion stops. **Every implementation we
+looked at stops at shared ownership and interior mutability, which is exactly
+where our handles live.** Surveyed 2026-09-14:
+[`gc`](https://docs.rs/gc/latest/src/gc/trace.rs.html) and
+[`ferris-gc`](https://docs.rs/ferris-gc/latest/src/ferris_gc/default_trace.rs.html)
+implement `Trace` for owned containers -- `Vec`, `Box`, `Option`, the maps and
+sets -- and name `Mutex`, `RwLock`, `RefCell` and `Cell` nowhere in those files at
+all, so a capture holding one fails the bound rather than being quietly skipped.
+[`bacon_rajan_cc`](https://docs.rs/bacon_rajan_cc/latest/src/bacon_rajan_cc/trace.rs.html)
+does supply impls for `Arc`, `Mutex`, `Barrier`, `Condvar`, `Once` and
+`PoisonError`, and every one of them has an empty body: it compiles, traverses
+nothing, and reproduces precisely the silent failure the two experiments above
+produced. Its `RwLock` is the one impl in the survey that recurses, and it does so
+by taking a **write** lock from inside the collector and folding a poisoned lock
+into a skipped subtree:
+
+```rust
+impl<T: Trace> Trace for sync::RwLock<T> {
+    fn trace(&self, tracer: &mut Tracer) {
+        if let Ok(v) = self.write() {
+            v.trace(tracer);
+        }
+    }
+}
+```
+
+The reasons run deeper than the deadlock this record first guessed at, though
+that hazard is visible in the `write()` above.
+[`dumpster`](https://docs.rs/dumpster/latest/dumpster/trait.Trace.html) requires a
+tree-like ownership structure -- no reference into a value may stay valid while
+the value moves -- and concludes in its own documentation that "`Rc` can never be
+`Trace`". [`shifgrethor`](https://github.com/withoutboats/shifgrethor#interior-mutability),
+the experiment this family of designs descends from, states the
+interior-mutability problem directly: a traced pointer can be moved *out* of an
+interior-mutable container and left unrooted while the collector runs, then put
+back once it dangles. Its answer restricts rather than solves -- `Cell` and
+`RefCell` over `NullTrace` data only, `PinCell` for anything traced -- and it
+calls the general case an open problem.
+
+That is load-bearing here, because a sodium `Cell` *is* a shared handle on an
+`Arc`-backed node. Tracing our own handles would be fine; that is what `Gc<T>`
+does in every crate above. What a trait would still not reach is a user's own
+`Arc<Mutex<Vec<Cell<i32>>>>` -- the shape both experiments used -- and that is not
+an unfilled gap in the ecosystem so much as a line the field has drawn twice, for
+reasons it treats as unsolved.
+
+So the honest form of this question is narrower than *should we adopt `Trace`*. A
+trait plus derive would take dependency discovery from depth one to the whole of a
+capture's **owned** structure, which is a genuine improvement for the common case.
+It would leave the case that motivated the manual mechanism exactly where it is.
+And a trace that misses an edge frees live data, so whether such a trait is
+`unsafe` is a real decision rather than a style one: `gc` declares
+`pub unsafe trait Trace`, while `ferris-gc`'s is safe and warns in prose that a
+wrong impl causes use-after-free.
 
 **What the 2020 thread was actually about.** Issue #48 opened on whether the
 combinators should be bounded on `Fn` rather than `FnMut`; closure inference was
