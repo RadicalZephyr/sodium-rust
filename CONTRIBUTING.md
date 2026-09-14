@@ -97,6 +97,21 @@ at [`docs/decisions/research/`](docs/decisions/research/) as a binary named afte
 record; one needing only rustc and std goes in a Rust Playground share link
 recorded in the ADR.
 
+The Playground is for recording a result, not for finding one. A share link is
+minted on someone else's infrastructure, and it publishes a gist that nobody can
+collect afterwards. So an experiment is developed **locally** -- `rustc` against
+a file in a scratch directory, as many times as it takes -- and goes to the
+Playground only once it produces the result the record is going to quote. Nothing
+is minted to find out what happens; a link is minted to publish what already
+happened.
+
+Two consequences, stated outright because the natural working rhythm violates
+both. **No iterative development against Playground resources**: an experiment
+that took four attempts should leave one link behind, not four, and reworking
+after minting turns the earlier links into litter that stays live and wrong. And
+**at most one link a minute** -- a record needing several is a record that should
+mint them at that pace.
+
 A Playground experiment is written as four parts in a fixed order: a bolded
 label saying what it demonstrates, the source in a code block, its output in a
 `text` block, and a provenance line as a blockquote beneath them, reading

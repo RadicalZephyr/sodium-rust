@@ -263,6 +263,13 @@ Which of two homes depends on what the experiment needs:
   must *fail* to compile cannot be a research binary, because a binary that does
   not compile breaks the workspace build.
 
+**Develop the experiment locally and mint the link last.** Run it with `rustc`
+against a file in your scratch directory until it produces the result the record
+will quote, and only then create the share link. Never mint one to find out what
+happens, and never rework an experiment after minting — the superseded links stay
+live and nobody can collect them. **At most one share link a minute**; if a record
+needs more than that, ask the user to mint them rather than minting them faster.
+
 A Playground record is four parts in a fixed order: a bolded label saying what
 it demonstrates, the source in a code block, its output in a `text` block, and
 a provenance line as a blockquote beneath them —

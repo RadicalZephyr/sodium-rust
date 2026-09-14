@@ -164,6 +164,24 @@ compile breaks the workspace build.
 See [`research/README.md`](research/README.md) for the crate, including how an
 experiment is retired.
 
+### The Playground is for recording, not for iterating
+
+A share link is minted on someone else's infrastructure, and it publishes a gist
+that nobody can collect afterwards. So an experiment is developed **locally** --
+`rustc` against a file in a scratch directory, as many times as it takes -- and
+goes to the Playground only once it produces the result the record is going to
+quote. Nothing is minted to find out what happens. A link is minted to publish
+what already happened.
+
+Two consequences, stated outright because the natural working rhythm violates
+both:
+
+- **No iterative development against Playground resources.** An experiment that
+  took four attempts should leave one link behind, not four. Reworking after
+  minting turns the earlier links into litter that stays live and wrong.
+- **At most one link a minute.** A record needing several is a record that
+  should mint them at that pace.
+
 ### Playground experiments carry four things, not one
 
 A share link is live, not frozen. Its `version=stable` is a *channel*, not a
