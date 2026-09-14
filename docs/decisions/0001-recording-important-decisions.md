@@ -242,10 +242,12 @@ test switch_c_simultaneous ... ignored, ADR-0007: switch_c ought to take the inn
 So a known gap advertises itself in normal output while CI stays green, and
 landing the fix deletes one attribute line rather than rewriting a test.
 
-*This experiment wants a Playground share link alongside the source, per the
-rule above. It does not have one yet: the environment this record was drafted in
-blocks `play.rust-lang.org` at the network policy. Added when someone with
-access can produce it.*
+The three artifacts the rule above asks for: the source and its output are the
+two blocks here, produced by rustc 1.98.1 (2026-09-01), and
+[the Playground link](https://play.rust-lang.org/?version=stable&mode=debug&edition=2024&gist=bb1bc640d9a67866d8c90f369972da57)
+re-runs it, checked on 2026-09-14. `version=stable` is a channel, so clicking it
+later runs against whatever stable is current then -- which is why the version
+stamp above, not the link, is the part that makes this falsifiable.
 
 ## Alternatives considered
 
