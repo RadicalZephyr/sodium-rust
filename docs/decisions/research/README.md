@@ -32,6 +32,14 @@ This is a workspace member, so `cargo test --workspace` and
 is checked for advisories like any other -- an experiment binary is still code
 someone runs, so not publishing it is no reason to skip that.
 
+[`patches/`](patches/) holds variants of the library itself, for the case a
+binary cannot reach: a binary here depends on `sodium-rust` the way a consumer
+does, so it can measure the library but not modify it, and an experiment whose
+whole point is comparing two builds has nowhere else to live.
+[`patches/README.md`](patches/README.md) says what each one is and how to run
+one against [`0002-variant-ab`](src/bin/0002-variant-ab.rs). They retire on the
+same terms as everything else here.
+
 It is not license-checked. The allow list in `deny.toml` covers what we
 redistribute and nothing here is, which is the same reason `criterion` and
 `trybuild` sit outside it too.

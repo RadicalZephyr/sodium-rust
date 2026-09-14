@@ -1,0 +1,230 @@
+diff --git a/src/impl_/cell.rs b/src/impl_/cell.rs
+index 7f8ffc5..18873cc 100644
+--- a/src/impl_/cell.rs
++++ b/src/impl_/cell.rs
+@@ -18,8 +18,8 @@ use crate::impl_::stream::Stream;
+ use crate::impl_::stream::StreamWeakForwardRef;
+ use crate::impl_::stream::WeakStream;
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::unsync_lock::Mutex;
++use crate::impl_::unsync_lock::RwLock;
+ use std::mem;
+ use std::sync::atomic::Ordering;
+ use std::sync::Arc;
+diff --git a/src/impl_/cell_loop.rs b/src/impl_/cell_loop.rs
+index add94cc..4fa99a7 100644
+--- a/src/impl_/cell_loop.rs
++++ b/src/impl_/cell_loop.rs
+@@ -3,7 +3,7 @@ use crate::impl_::lazy::Lazy;
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::stream_loop::StreamLoop;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::unsync_lock::Mutex;
+ use std::mem;
+ use std::sync::Arc;
+ 
+diff --git a/src/impl_/gc_node.rs b/src/impl_/gc_node.rs
+index 62ff9d0..005cbad 100644
+--- a/src/impl_/gc_node.rs
++++ b/src/impl_/gc_node.rs
+@@ -1,7 +1,7 @@
+ #![allow(clippy::only_used_in_recursion)]
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::unsync_lock::Mutex;
++use crate::impl_::unsync_lock::RwLock;
+ use std::cell::Cell;
+ use std::collections::HashSet;
+ use std::fmt::Write as _;
+@@ -123,7 +123,9 @@ impl GcCtx {
+         trace!("start: mark_roots");
+         let mut old_roots: Vec<GcNode> = Vec::new();
+         self.with_data(|data: &mut GcCtxData| std::mem::swap(&mut old_roots, &mut data.roots));
+-        self.display_graph(&old_roots);
++        if log::log_enabled!(log::Level::Trace) {
++            self.display_graph(&old_roots);
++        }
+         let mut new_roots: Vec<GcNode> = Vec::new();
+         for root in &old_roots {
+             self.reset_ref_count_adj_step_1_of_2(root);
+diff --git a/src/impl_/lazy.rs b/src/impl_/lazy.rs
+index c07155f..5dd9db2 100644
+--- a/src/impl_/lazy.rs
++++ b/src/impl_/lazy.rs
+@@ -1,4 +1,4 @@
+-use parking_lot::Mutex;
++use crate::impl_::unsync_lock::Mutex;
+ use std::sync::Arc;
+ 
+ /// A representation for a value that may not be available until the
+diff --git a/src/impl_/listener.rs b/src/impl_/listener.rs
+index d6f0885..e2b35d3 100644
+--- a/src/impl_/listener.rs
++++ b/src/impl_/listener.rs
+@@ -3,7 +3,7 @@ use crate::impl_::node::{IsNode, Node};
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::sodium_ctx::SodiumCtxData;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::unsync_lock::Mutex;
+ use std::fmt;
+ use std::sync::Arc;
+ 
+diff --git a/src/impl_/mod.rs b/src/impl_/mod.rs
+index 8e23d37..9bead50 100644
+--- a/src/impl_/mod.rs
++++ b/src/impl_/mod.rs
+@@ -17,3 +17,4 @@ pub mod stream;
+ pub mod stream_loop;
+ pub mod stream_sink;
+ pub mod transaction;
++pub mod unsync_lock;
+diff --git a/src/impl_/node.rs b/src/impl_/node.rs
+index 5918658..487f693 100644
+--- a/src/impl_/node.rs
++++ b/src/impl_/node.rs
+@@ -1,4 +1,4 @@
+-use parking_lot::RwLock;
++use crate::impl_::unsync_lock::RwLock;
+ use std::collections::HashMap;
+ use std::collections::HashSet;
+ use std::fmt;
+diff --git a/src/impl_/sodium_ctx.rs b/src/impl_/sodium_ctx.rs
+index 201ba9e..c916544 100644
+--- a/src/impl_/sodium_ctx.rs
++++ b/src/impl_/sodium_ctx.rs
+@@ -4,7 +4,7 @@ use crate::impl_::node::{
+     box_clone_vec_is_node, box_clone_vec_is_weak_node, IsNode, IsWeakNode, Node,
+ };
+ 
+-use parking_lot::Mutex;
++use crate::impl_::unsync_lock::Mutex;
+ use std::mem;
+ use std::sync::atomic::AtomicUsize;
+ use std::sync::atomic::Ordering;
+@@ -311,10 +311,12 @@ impl SodiumCtx {
+                 node.data.visited.store(false, Ordering::SeqCst);
+             });
+         }
+-        // visit dependencies
++        // visit dependencies, and report back whether any of them changed --
++        // moving the vector into the closure rather than cloning it a second
++        // time, and returning the answer through the joiner the threaded mode
++        // already provides.
+         let handle;
+         {
+-            let dependencies = box_clone_vec_is_node(&dependencies);
+             let _self = self.clone();
+             handle = self.threaded_mode.spawn(move || {
+                 for dependency in &dependencies {
+@@ -323,16 +325,14 @@ impl SodiumCtx {
+                         _self.update_node(dependency.node());
+                     }
+                 }
++                dependencies
++                    .iter()
++                    .any(|node: &Box<dyn IsNode + Send + Sync + 'static>| {
++                        node.node().data().changed.load(Ordering::SeqCst)
++                    })
+             });
+         }
+-        handle.join();
+-        // any dependencies changed?
+-        let any_changed =
+-            dependencies
+-                .iter()
+-                .any(|node: &Box<dyn IsNode + Send + Sync + 'static>| {
+-                    node.node().data().changed.load(Ordering::SeqCst)
+-                });
++        let any_changed = handle.join();
+         // if dependencies changed, then execute update on current node
+         if any_changed {
+             let mut update = node.data.update.write();
+diff --git a/src/impl_/stream.rs b/src/impl_/stream.rs
+index 210135e..e65160d 100644
+--- a/src/impl_/stream.rs
++++ b/src/impl_/stream.rs
+@@ -11,8 +11,8 @@ use crate::impl_::sodium_ctx::SodiumCtxData;
+ use crate::impl_::stream_loop::StreamLoop;
+ use crate::impl_::stream_sink::StreamSink;
+ 
+-use parking_lot::Mutex;
+-use parking_lot::RwLock;
++use crate::impl_::unsync_lock::Mutex;
++use crate::impl_::unsync_lock::RwLock;
+ use std::sync::atomic::Ordering;
+ use std::sync::Arc;
+ use std::sync::Weak;
+diff --git a/src/impl_/stream_loop.rs b/src/impl_/stream_loop.rs
+index ecab84b..e4ea0df 100644
+--- a/src/impl_/stream_loop.rs
++++ b/src/impl_/stream_loop.rs
+@@ -3,7 +3,7 @@ use crate::impl_::node::IsNode;
+ use crate::impl_::sodium_ctx::SodiumCtx;
+ use crate::impl_::stream::Stream;
+ 
+-use parking_lot::Mutex;
++use crate::impl_::unsync_lock::Mutex;
+ use std::sync::Arc;
+ 
+ use super::name::NodeName;
+diff --git a/src/impl_/unsync_lock.rs b/src/impl_/unsync_lock.rs
+new file mode 100644
+index 0000000..c8cdb8d
+--- /dev/null
++++ b/src/impl_/unsync_lock.rs
+@@ -0,0 +1,50 @@
++//! A measurement device, not a proposal.
++//!
++//! Drop-in replacements for `parking_lot::Mutex` and `parking_lot::RwLock`
++//! that perform no synchronisation whatsoever. Swapping these in and
++//! re-running the benchmarks bounds what *any* lock-elimination scheme could
++//! buy: a GhostCell port cannot beat "no locks at all".
++//!
++//! This is unsound in general. The benchmarks are single-threaded.
++
++use std::cell::UnsafeCell;
++use std::ops::{Deref, DerefMut};
++
++pub struct Guard<'a, T: ?Sized>(&'a UnsafeCell<T>);
++
++impl<T: ?Sized> Deref for Guard<'_, T> {
++    type Target = T;
++    fn deref(&self) -> &T {
++        unsafe { &*self.0.get() }
++    }
++}
++impl<T: ?Sized> DerefMut for Guard<'_, T> {
++    fn deref_mut(&mut self) -> &mut T {
++        unsafe { &mut *self.0.get() }
++    }
++}
++
++macro_rules! fake_lock {
++    ($name:ident, $($method:ident),+) => {
++        pub struct $name<T: ?Sized> {
++            value: UnsafeCell<T>,
++        }
++        unsafe impl<T: ?Sized + Send> Send for $name<T> {}
++        unsafe impl<T: ?Sized + Send> Sync for $name<T> {}
++        impl<T> $name<T> {
++            pub fn new(value: T) -> Self {
++                $name { value: UnsafeCell::new(value) }
++            }
++        }
++        impl<T: ?Sized> $name<T> {
++            $(
++                pub fn $method(&self) -> Guard<'_, T> {
++                    Guard(&self.value)
++                }
++            )+
++        }
++    };
++}
++
++fake_lock!(Mutex, lock);
++fake_lock!(RwLock, read, write);

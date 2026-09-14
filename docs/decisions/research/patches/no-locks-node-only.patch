@@ -1,0 +1,75 @@
+diff --git a/src/impl_/mod.rs b/src/impl_/mod.rs
+index 8e23d37..9bead50 100644
+--- a/src/impl_/mod.rs
++++ b/src/impl_/mod.rs
+@@ -17,3 +17,4 @@ pub mod stream;
+ pub mod stream_loop;
+ pub mod stream_sink;
+ pub mod transaction;
++pub mod unsync_lock;
+diff --git a/src/impl_/node.rs b/src/impl_/node.rs
+index 5918658..487f693 100644
+--- a/src/impl_/node.rs
++++ b/src/impl_/node.rs
+@@ -1,4 +1,4 @@
+-use parking_lot::RwLock;
++use crate::impl_::unsync_lock::RwLock;
+ use std::collections::HashMap;
+ use std::collections::HashSet;
+ use std::fmt;
+diff --git a/src/impl_/unsync_lock.rs b/src/impl_/unsync_lock.rs
+new file mode 100644
+index 0000000..c8cdb8d
+--- /dev/null
++++ b/src/impl_/unsync_lock.rs
+@@ -0,0 +1,50 @@
++//! A measurement device, not a proposal.
++//!
++//! Drop-in replacements for `parking_lot::Mutex` and `parking_lot::RwLock`
++//! that perform no synchronisation whatsoever. Swapping these in and
++//! re-running the benchmarks bounds what *any* lock-elimination scheme could
++//! buy: a GhostCell port cannot beat "no locks at all".
++//!
++//! This is unsound in general. The benchmarks are single-threaded.
++
++use std::cell::UnsafeCell;
++use std::ops::{Deref, DerefMut};
++
++pub struct Guard<'a, T: ?Sized>(&'a UnsafeCell<T>);
++
++impl<T: ?Sized> Deref for Guard<'_, T> {
++    type Target = T;
++    fn deref(&self) -> &T {
++        unsafe { &*self.0.get() }
++    }
++}
++impl<T: ?Sized> DerefMut for Guard<'_, T> {
++    fn deref_mut(&mut self) -> &mut T {
++        unsafe { &mut *self.0.get() }
++    }
++}
++
++macro_rules! fake_lock {
++    ($name:ident, $($method:ident),+) => {
++        pub struct $name<T: ?Sized> {
++            value: UnsafeCell<T>,
++        }
++        unsafe impl<T: ?Sized + Send> Send for $name<T> {}
++        unsafe impl<T: ?Sized + Send> Sync for $name<T> {}
++        impl<T> $name<T> {
++            pub fn new(value: T) -> Self {
++                $name { value: UnsafeCell::new(value) }
++            }
++        }
++        impl<T: ?Sized> $name<T> {
++            $(
++                pub fn $method(&self) -> Guard<'_, T> {
++                    Guard(&self.value)
++                }
++            )+
++        }
++    };
++}
++
++fake_lock!(Mutex, lock);
++fake_lock!(RwLock, read, write);

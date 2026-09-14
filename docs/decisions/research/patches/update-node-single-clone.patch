@@ -1,0 +1,33 @@
+diff --git a/src/impl_/sodium_ctx.rs b/src/impl_/sodium_ctx.rs
+index 201ba9e..cc8ad64 100644
+--- a/src/impl_/sodium_ctx.rs
++++ b/src/impl_/sodium_ctx.rs
+@@ -311,21 +311,14 @@ impl SodiumCtx {
+                 node.data.visited.store(false, Ordering::SeqCst);
+             });
+         }
+-        // visit dependencies
+-        let handle;
+-        {
+-            let dependencies = box_clone_vec_is_node(&dependencies);
+-            let _self = self.clone();
+-            handle = self.threaded_mode.spawn(move || {
+-                for dependency in &dependencies {
+-                    let visited = dependency.data().visited.load(Ordering::SeqCst);
+-                    if !visited {
+-                        _self.update_node(dependency.node());
+-                    }
+-                }
+-            });
++        // visit dependencies -- inlined single-threaded path: no second clone
++        // of the dependency vector and no spawn scaffolding.
++        for dependency in &dependencies {
++            let visited = dependency.data().visited.load(Ordering::SeqCst);
++            if !visited {
++                self.update_node(dependency.node());
++            }
+         }
+-        handle.join();
+         // any dependencies changed?
+         let any_changed =
+             dependencies

@@ -13,3 +13,8 @@ description = "Experiments backing the decision records in docs/decisions/"
 
 [dependencies]
 sodium-rust = { path = "../../.." }
+# 0002 measures the cost of a lock against the cost of a permission token, so
+# it needs both the lock implementation the library uses and the token crate
+# under evaluation. Neither is redistributed; see README.md.
+parking_lot = "0.12"
+qcell = "0.5"

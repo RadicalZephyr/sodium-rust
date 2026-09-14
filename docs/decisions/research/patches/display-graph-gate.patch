@@ -1,0 +1,15 @@
+diff --git a/src/impl_/gc_node.rs b/src/impl_/gc_node.rs
+index 62ff9d0..fad8401 100644
+--- a/src/impl_/gc_node.rs
++++ b/src/impl_/gc_node.rs
+@@ -123,7 +123,9 @@ impl GcCtx {
+         trace!("start: mark_roots");
+         let mut old_roots: Vec<GcNode> = Vec::new();
+         self.with_data(|data: &mut GcCtxData| std::mem::swap(&mut old_roots, &mut data.roots));
+-        self.display_graph(&old_roots);
++        if log::log_enabled!(log::Level::Trace) {
++            self.display_graph(&old_roots);
++        }
+         let mut new_roots: Vec<GcNode> = Vec::new();
+         for root in &old_roots {
+             self.reset_ref_count_adj_step_1_of_2(root);
