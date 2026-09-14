@@ -565,14 +565,128 @@ it, and `*_with_deps` puts the same claim where a reviewer can see it. This is t
 alternative most worth revisiting if the capture-visiting technique ever gets a
 supported footing.
 
-**Derive the deps by watching reference counts.** clinuxrulz's other 2020 idea:
-"execute `clone` on a lambda, then work out which sodium objects just had their
-reference count increased." Recorded because it is genuinely clever and because
-it is the only proposal in that thread nobody answered. It needs a clone of the
-user's closure to be observable and side-effect-free, it sees only nodes held by
-strong count, and it would make dependency discovery a runtime property of a
-graph whose whole memory model is the collector getting these edges exactly
-right. Not pursued.
+**Derive the deps by watching reference counts.** clinuxrulz's other 2020 idea,
+and the only proposal in that thread nobody answered:
+
+> The idea is to execute `clone` on a lambda, then work out which sodium objects
+> just had their reference count increased. That way you can work out which
+> sodium objects are referenced in a lambda without the end user telling the
+> library.
+
+It is a good idea, and it half works, which is the problem.
+
+**Experiment -- refcount deltas miss a dependency held behind a shared handle**
+
+```rust
+use std::sync::{Arc, Mutex};
+
+/// Stands in for a sodium node. What the technique observes is its strong count.
+#[derive(Clone)]
+struct Node(Arc<&'static str>);
+
+impl Node {
+    fn new(name: &'static str) -> Node {
+        Node(Arc::new(name))
+    }
+    fn count(&self) -> usize {
+        Arc::strong_count(&self.0)
+    }
+}
+
+/// The 2020 proposal: clone the lambda, and whichever nodes just had their
+/// reference count go up are the ones it captured.
+///
+/// `candidates` is a gift. The real library has no enumeration of live nodes --
+/// not knowing what a closure touched is the whole problem -- so this is the
+/// technique at its most favourable.
+fn deps_by_clone<F: Clone>(f: &F, candidates: &[(&'static str, &Node)]) -> Vec<&'static str> {
+    let before: Vec<usize> = candidates.iter().map(|(_, n)| n.count()).collect();
+    let twin = f.clone();
+    let after: Vec<usize> = candidates.iter().map(|(_, n)| n.count()).collect();
+    drop(twin);
+
+    candidates
+        .iter()
+        .zip(before.iter().zip(after.iter()))
+        .filter(|(_, (b, a))| a > b)
+        .map(|((name, _), _)| *name)
+        .collect()
+}
+
+fn main() {
+    let ca = Node::new("ca");
+    let cb = Node::new("cb");
+    let hidden = Node::new("hidden");
+    let untouched = Node::new("untouched");
+
+    // The motivating case: a closure picking between two captured cells, which
+    // is what `switch_c` needs declared. Both are real dependencies.
+    let (a, b) = (ca.clone(), cb.clone());
+    let picks = move |left: bool| if left { a.clone() } else { b.clone() };
+
+    // The same dependency, reached through one shared handle -- a closure
+    // holding a collection of nodes rather than a named one.
+    let registry: Arc<Mutex<Vec<Node>>> = Arc::new(Mutex::new(vec![hidden.clone()]));
+    let looks_up = move |i: usize| registry.lock().unwrap()[i].clone();
+
+    let candidates = [
+        ("ca", &ca),
+        ("cb", &cb),
+        ("hidden", &hidden),
+        ("untouched", &untouched),
+    ];
+
+    println!("picks    captures ca, cb -> {:?}", deps_by_clone(&picks, &candidates));
+    println!("looks_up reaches  hidden -> {:?}", deps_by_clone(&looks_up, &candidates));
+
+    // Both closures really do reach those nodes.
+    println!();
+    println!("picks(true)  = {}", *picks(true).0);
+    println!("looks_up(0)  = {}", *looks_up(0).0);
+}
+```
+
+```text
+picks    captures ca, cb -> ["ca", "cb"]
+looks_up reaches  hidden -> []
+
+picks(true)  = ca
+looks_up(0)  = hidden
+```
+
+> rustc 1.98.1 (released 2026-09-01) - output checked 2026-09-14 - [Rust Playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=7351b48d415c963df5a406db61a81fca)
+
+The first line is the technique working on precisely the case that motivates
+`*_with_deps` -- `with_deps_tracks_cells_captured_by_a_closure` in
+[`tests/closure_type_inference.rs`](../../tests/closure_type_inference.rs) has the
+same shape, and both cells are found.
+
+The second line is why it cannot be adopted. `looks_up` reaches `hidden` at call
+time, as the output below it shows, and the technique reports that it depends on
+nothing. `Arc::clone` is shallow by construction: cloning the closure bumps the
+count on the one handle it captured and on nothing the handle points at. One
+layer of sharing between a closure and a node makes the node invisible, and
+*sharing is what a handle is for* -- a closure that holds a collection of nodes,
+or any node reached through a structure the closure clones by pointer, lands
+here.
+
+That is the worst failure this library has. A trace that misses an edge frees
+live data, and this misses it while returning a confident empty answer rather
+than an error. Compare the failure mode of `*_with_deps`: a caller who forgets a
+`Dep` makes the same mistake, but the declaration is at the call site where a
+reviewer reads it, and the mechanism never tells anyone the list is complete.
+
+Three further costs, none of which the experiment needed to reach. The candidate
+list it is handed does not exist: the library has no enumeration of live nodes,
+and building one means a registry of every node in the graph, whose entries are
+themselves references. `F: Clone` would have to join every combinator bound,
+which is its own breaking change and excludes any closure capturing something
+unclonable. And a strong count is global state, so a concurrent clone or drop of
+the same node between the two reads changes the answer -- these bounds are
+`Send + Sync` and `ThreadedMode` exists to make the evaluator concurrent.
+
+Worth revisiting only if dependency discovery moves somewhere it can see through
+indirection, which refcount deltas cannot by construction.
 
 ## Consequences
 
@@ -650,8 +764,11 @@ still failed `fn_bound_rejects_lambda` on the article in `expected a` versus
 `expected an`.
 
 So the reductions move here, as Playground experiments, and leave the test suite.
-The fourth experiment, on `fn_traits`, is new: it was a claim in a commit message
-with nothing behind it, and it is the claim in this record most likely to expire.
+Two of the experiments are new. The one on `fn_traits` was a claim in a commit
+message with nothing behind it, and is the claim in this record most likely to
+expire. The one on refcount deltas answers a 2020 proposal that nobody answered
+at the time, which is the other thing a record is for: a rejected alternative
+stays rejected only while the reason is on file.
 `tests/ui/bare_closures.rs` stays: it exercises every function-taking combinator
 with an unannotated closure from outside the crate, which is a property we do
 promise, and it carries no expected output, so it runs on every channel. The
