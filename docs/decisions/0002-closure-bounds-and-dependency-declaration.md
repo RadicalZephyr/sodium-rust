@@ -1,30 +1,51 @@
 # 0002 -- Closure bounds and dependency declaration
 
 <details>
-<summary><strong>Status:</strong> Implemented 2026-08-23</summary>
+<summary><strong>Status:</strong> Implemented 2026-09-02</summary>
 
 | Date | Transition |
 | --- | --- |
-| 2026-08-23 | Implemented |
+| 2026-09-02 | Implemented |
 | 2026-09-14 | Drafted |
 | 2026-09-14 | Accepted |
 
 </details>
 
-*This record is a reconstruction. The change shipped on 2026-08-23, before
-`docs/decisions/` existed; the record was written on 2026-09-14 from the commits,
-the code comments and the diff. So the log runs backwards, and the rule that the
-last row is the current state does not hold here -- the summary line is. That is
-the honest reading of a record written after the fact, and we are deliberately
+*This record is a reconstruction. The change merged on 2026-09-02, before
+`docs/decisions/` existed; the record was written on 2026-09-14 from
+[the pull request](https://github.com/RadicalZephyr/sodium-rust/pull/30),
+[the issue it closes](https://github.com/RadicalZephyr/sodium-rust/issues/14),
+the commit messages, the `THEORY` write-up that shipped in
+`tests/closure_type_inference.rs` -- now a pointer to this record rather than a
+second copy of it -- and the diff. So the log runs backwards, and the rule that
+the last row is the current state does not hold here; the summary line is. That
+is the honest reading of a record written after the fact, and we are deliberately
 not generalising it: [`README.md`](README.md)'s rule stands, because writing
-records late is not something we plan to do again. Most of what follows is
-recovered from the commit messages and from the `THEORY` write-up that shipped
-in `tests/closure_type_inference.rs`, which is now a pointer to this record
-rather than a second copy of it. Two arguments are not recovered -- the
-discoverability inversion and the cross-port divergence -- and they are marked
-where they appear.*
+records late is not something we plan to do again. Three arguments below are not
+recovered from those sources -- the reading of why the diagnosis stalled for two
+and a half years, the discoverability inversion, and the cross-port divergence --
+and each is marked where it appears.*
 
 ## Context
+
+[Issue #14](https://github.com/RadicalZephyr/sodium-rust/issues/14), opened on
+2024-03-03 under the title *Type boilerplate makes it look like Java*, is where
+this starts:
+
+> There is quite a lot of syntactic overhead in writing Sodium code, especially
+> when compared to the very small amounts of actual working code. One of the
+> major contributors to this is needing to annotate the types on the closures
+> passed to all the combinator methods.
+
+It was filed as a pain point and put on the 3.0 milestone, which is the part
+worth noticing: this was expected to cost a major version before anyone knew
+what the fix was. The complaint is also not about inference as such. It is about
+a ratio -- ceremony to working code -- and that is the thing to keep in view,
+because it is what decides between the alternatives further down. Two designs
+can both restore inference and still differ on what they charge a reader.
+
+The annotations trace back to how this library asks a caller to declare what a
+closure captures.
 
 Sodium's garbage collector has to know what every node in the graph holds a
 reference to. Most of the time it can see that from the shape of the network:
@@ -179,6 +200,38 @@ about `?U`, because `Neg::Output` is not injective. There the full `&i32` was
 needed. `infers_even_when_body_only_constrains_an_associated_type` in
 [`tests/closure_type_inference.rs`](../../tests/closure_type_inference.rs) is that
 case, now passing with no annotation at all.
+
+## Why the diagnosis took two and a half years
+
+The hypothesis was right on the first day. A comment on issue #14, posted a
+minute after the issue itself on 2024-03-03:
+
+> My current suspicion about what is causing the type inference to fail is the
+> `IsLambda*` traits. I haven't been able to successfully replace them in order
+> to prove this tho.
+
+That is the conclusion this record argues for, stated correctly, two and a half
+years early -- together with the reason it stayed a suspicion. The only
+experiment in view was replacing the traits in the library, and replacing them
+*is* the change. So the cost of testing the hypothesis was the cost of acting on
+it, which is a bad position to reason from: you cannot afford to be wrong, so you
+do not try.
+
+What broke the deadlock -- this record's reading, not anything the commits say --
+is that the failure does not need the library at all. It reproduces in a trait
+declaration, a blanket impl and one call, which is the first experiment above.
+Once that costs five minutes, so does every follow-up: *is it the two impls
+overlapping?* *Would an extra bound fix it?* *What does the deps-carrying call
+site do under that bound?* Each of those is a question the two-and-a-half-year
+version of this problem could not afford to ask, and each of them moved the
+argument -- the first ruled out the obvious alternative cause, and the other two
+are why the API was split in two rather than given a second bound.
+
+Which is [ADR-0001](0001-recording-important-decisions.md)'s argument for keeping
+research cheap and minimal, arrived at from the other end and before that record
+existed. This one is its first customer, and the evidence it needed turned out to
+be evidence nobody had been able to produce while the only available experiment
+was the change itself.
 
 ## Two costs the commits did not name
 
@@ -399,14 +452,20 @@ navigable.
 **It is a breaking change, and a mechanical one.** `combinator(lambda1(f, deps))`
 stops compiling; the migration is `combinator_with_deps(f, deps)`, and it drops
 an annotation rather than adding one. `CHANGELOG.md` carries the before/after.
+The breakage was budgeted rather than discovered: issue #14 sat on the 3.0
+milestone from 2024, so a major version was already the expected price. The
+change is unreleased at the time of writing -- the crate is at 2.1.3 and the
+entry is under `Unreleased`.
 
 **The function-taking surface doubles.** 23 base methods gained 23 siblings, all
 of which appear in rustdoc, and `map` now sorts next to `map_to` and
 `map_with_deps`. This is a real cost and it lands on the reader of the
-documentation. We think it is the right trade because the alternative charged
-every call site for a feature few call sites use -- but it is the cost most
-likely to be regretted, and the one that disappears if `fn_traits` ever
-stabilises.
+documentation. Against issue #14's ratio, that is the trade we chose: ceremony
+moves off the call sites, where it was charged to everyone on every closure, and
+onto the method index, where it is charged once to whoever is reading it -- and
+the alternative was charging every call site for a feature few call sites use.
+It is still the cost most likely to be regretted, and the one that disappears if
+`fn_traits` ever stabilises.
 
 **The capability is now visible in the method list.** Whether a combinator can
 take dependencies used to be a fact about a trait bound; it is now a fact about
@@ -434,7 +493,8 @@ counting. The hazard is not new. It was previously reachable only through a
 
 ## Where this record's evidence lives
 
-*This section is a decision made on 2026-09-14, by this record, not in August.*
+*This section is a decision made on 2026-09-14, by this record. It was not part
+of the original change.*
 
 The first three reductions above shipped with the change as `compile_fail` cases
 under `tests/ui/` -- four files, since trybuild needs the two halves of the
@@ -472,6 +532,17 @@ that captures a `Cell` and samples it has no way to say so. Whether this is a ga
 to close with two more siblings or a sign that these combinators want a different
 treatment, we have not worked out; the change did not touch them and this record
 is not deciding it.
+
+**The bad-diagnostics thread was never pulled.** Issue #14 also said that "in
+some cases the error messages when you have incorrect types are actually quite
+bad (this might be worth reporting to the Rust compiler)". Nobody followed that
+up, and the fix has made it hard to reach: with `FnMut` bounds the diagnostics
+are now the ordinary ones rustc gives any closure, so whatever was bad about them
+is mostly no longer reachable through this API. What we do not know is whether
+there was a reportable rustc bug in there, distinct from the deduction behaviour
+documented above -- which is working as designed and not a bug at all. If anyone
+still has one of those error messages, it is worth a look before the memory of
+them goes.
 
 **Whether stabilisation should collapse the API back.** If `unboxed_closures`
 and `fn_traits` stabilise, `Lambda<FN>` can implement `FnMut` and the 23 siblings
