@@ -58,7 +58,7 @@ Decisions whose *reasoning* is the valuable part get a record in
 stay current, with new information added as a dated note marked as arriving
 after the decision, never as a silent revision of the original reasoning. Read
 the directory as the current state of the project's decisions, and reach for
-`git log -p` when you want how it got there.
+`git log -p` when you want to known how it got there.
 [`docs/decisions/README.md`](docs/decisions/README.md) has the conventions;
 [`0001-recording-important-decisions.md`](docs/decisions/0001-recording-important-decisions.md)
 argues for them.
