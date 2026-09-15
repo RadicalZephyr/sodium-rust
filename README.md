@@ -1,8 +1,8 @@
 # Sodium
 
 [![CI](https://github.com/RadicalZephyr/sodium-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/RadicalZephyr/sodium-rust/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/sodium.svg)](https://crates.io/crates/sodium)
-[![docs.rs](https://docs.rs/sodium/badge.svg)](https://docs.rs/sodium)
+[![crates.io](https://img.shields.io/crates/v/sodium-rust.svg)](https://crates.io/crates/sodium-rust)
+[![docs.rs](https://docs.rs/sodium-rust/badge.svg)](https://docs.rs/sodium-rust)
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-blue.svg)](LICENSE)
 
 A Functional Reactive Programming (FRP) library for Rust, part of the
@@ -24,7 +24,7 @@ transaction, with no intermediate glitches.
 
 ```toml
 [dependencies]
-sodium = "0.1"
+sodium-rust = "2.1"
 ```
 
 ## Example
@@ -57,7 +57,7 @@ fn main() {
 
 ## Documentation
 
-- [API documentation on docs.rs](https://docs.rs/sodium).
+- [API documentation on docs.rs](https://docs.rs/sodium-rust).
 - `src/tests.rs` is the most complete set of worked examples in the
   repository — it exercises nearly every combinator.
 - `docs/internals/insights.md` covers implementation notes.
@@ -135,7 +135,7 @@ This is a Cargo workspace.
 
 | Path | Contents |
 | --- | --- |
-| `src/` | the `sodium` library |
+| `src/` | the `sodium-rust` library |
 | `benches/` | Criterion benchmarks (`cargo bench`) |
 | `coz-driver/` | a causal-profiling workload — see [`coz-driver/README.md`](coz-driver/README.md) |
 | `tools/` | developer scripts, including the Coz installer |

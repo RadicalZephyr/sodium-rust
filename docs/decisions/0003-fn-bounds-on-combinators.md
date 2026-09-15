@@ -1,13 +1,19 @@
 # 0003 -- `Fn` bounds on the combinators
 
 <details>
-<summary><strong>Status:</strong> Draft</summary>
+<summary><strong>Status:</strong> Accepted 2026-09-14</summary>
 
 | Date | Transition |
 | --- | --- |
 | 2026-09-14 | Drafted |
+| 2026-09-14 | Accepted |
 
 </details>
+
+*`Implemented` is not logged yet. The work is in the same pull request as this
+record, so the row belongs on the commit that merges it -- logging it here would
+claim an event that has not happened, and the gap between `Accepted` and
+`Implemented` is the one number the log exists to make visible.*
 
 ## Context
 

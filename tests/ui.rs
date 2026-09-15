@@ -12,14 +12,17 @@
 //!   so the reasoning in `tests/closure_type_inference.rs` stays checked rather
 //!   than merely asserted.
 //!
-//! `combinator_rejects_captured_state.rs`,
-//! `listener_accepts_captured_state.rs` and
-//! `fnmut_bound_rejects_shared_reference.rs` belong to a separate question:
-//! the split between `Fn` on the combinators and `FnMut` on the listeners
-//! ([issue #48]). The first two run against the real API -- they are the
-//! guard on each side of that split -- and the third stays a reduction,
-//! because it is about a property of the traits rather than of this crate.
-//! `tests/fn_vs_fnmut.rs` is their runtime half and carries the findings.
+//! `combinator_rejects_captured_state.rs` and
+//! `listener_accepts_captured_state.rs` belong to a separate question: the
+//! split between `Fn` on the combinators and `FnMut` on the listeners
+//! ([issue #48]). Both run against the real API, and they are the guard on
+//! each side of that split -- the shapes a combinator now refuses, and the
+//! ones a listener still takes. `tests/fn_vs_fnmut.rs` is their runtime half.
+//!
+//! The compiler behaviour that argument rests on is not here. It is recorded
+//! in [ADR-0003](../docs/decisions/0003-fn-bounds-on-combinators.md) as
+//! Playground experiments, which is where a case about rustc rather than about
+//! this crate belongs.
 //!
 //! [issue #48]: https://github.com/SodiumFRP/sodium-rust/issues/48
 //!
