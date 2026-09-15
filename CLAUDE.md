@@ -32,17 +32,38 @@ RUST_LOG=trace cargo test --lib tests::mem_test::mem -- --nocapture
 cycle collector logs the whole graph it is walking, node by node, with the
 `NodeName`s from `src/impl_/name.rs` attached.
 
-The `compile_fail` cases under `tests/ui/` carry expected rustc output, which is
-not stable across releases. After a deliberate change to a diagnostic:
+`tests/ui/` is the `trybuild` suite. A `compile_fail` case belongs there when the
+*rejection* is something this crate promises — a closure shape our own bounds
+refuse. It does not belong there when it demonstrates a *compiler* behaviour:
+that is evidence for a decision, and goes in the record arguing from it as a
+Playground experiment.
+[ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md) is
+the worked example — its reductions sat in `tests/ui/` until that record gave
+them a better home, which is why only the pass case is left today.
 
-```shell
-TRYBUILD=overwrite cargo test --test ui
-```
+Any `compile_fail` case carries expected rustc output, and rustc does not keep
+diagnostics stable across releases, so `tests/ui.rs` gates those cases twice over:
 
-Only after a deliberate change. A mismatch you did not cause means your
-toolchain is not the stable these were blessed against — run `rustup check`
-first. Blessing on an older rustc commits its wording and turns CI red, and the
-diff looks innocuous: the article in `expected a`/`expected an` is a real
+- **Locally**, only on the exact stable the snapshots were blessed against,
+  spelled `#[rustversion::stable(1.98)]`. A plain `#[rustversion::stable]` gate
+  excludes beta and nightly but not an *older* stable, which is how a contributor
+  ends up with a red build out of a diff they did not write.
+- **In CI**, on any stable, because checking the snapshots against the current
+  stable is the point of keeping them, and a failure there is addressed to us
+  rather than to a bystander. `const IN_CI: bool = option_env!("CI").is_some();`
+  is the switch -- resolved at compile time, and cargo rebuilds when the variable
+  changes.
+
+Bump the version in both `rustversion` attributes in the same commit as the new
+snapshots. A `compile_fail` case should only ever be left ungated if
+`sodium-rust` itself emits the diagnostic -- if this crate ever ships a
+proc-macro, its errors are ours to promise and ours to keep stable.
+
+After a deliberate change to a diagnostic, re-bless with `TRYBUILD=overwrite
+cargo test --test ui` -- and only after a deliberate change. A mismatch you did
+not cause means your toolchain is not the blessed stable, so run `rustup check`
+first: blessing on an older rustc commits its wording and turns CI red, in a diff
+that looks innocuous. The article in `expected a` versus `expected an` is a real
 example.
 
 Benchmarks are Criterion, and the causal profiler is a separate workload with
@@ -158,10 +179,15 @@ under both.
 - `tests/closure_type_inference.rs` — the closure ergonomics guarantee, from
   outside the crate. `infers_*` uses bare unannotated closures; `with_deps_*`
   covers the explicit-`Dep` siblings.
-- `tests/ui/` via `tests/ui.rs` — the same guarantee at compile time, plus
-  reduced repros of the *old* failure so the reasoning stays checked rather
-  than merely asserted. The `compile_fail` cases are gated to stable with
-  `rustversion`.
+- `tests/ui/bare_closures.rs` via `tests/ui.rs` — the same guarantee at compile
+  time, from outside the crate. A `trybuild` pass case with no expected output,
+  so it runs on every channel. The reductions of the *old* failure used to sit
+  beside it as `compile_fail` cases; they demonstrated a compiler behaviour
+  rather than one of ours, so they are evidence rather than guards and now live
+  in
+  [ADR-0002](docs/decisions/0002-closure-bounds-and-dependency-declaration.md).
+  The `#[rustversion::stable]` gate they needed is still in `tests/ui.rs`, empty,
+  for a case that promises something we do.
 - `#[ignore = "ADR-NNNN: ..."]` tests in `src/tests.rs` — known gaps between
   what Sodium's denotational semantics require and what this implementation
   does. They are meant to fail; see the ADR conventions below before adding

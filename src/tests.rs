@@ -1,4 +1,4 @@
-use crate::{Cell, CellLoop, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
+use crate::{Cell, CellLoop, Enum2, Operational, SodiumCtx, Stream, StreamLoop, StreamSink};
 
 use std::{
     num::ParseIntError,
@@ -1630,6 +1630,59 @@ fn primes2() {
             let lock = out.lock();
             let out: &Vec<i64> = lock.as_ref().unwrap();
             assert_eq!(vec![2, 3, 5, 7, 11, 13, 17, 19], *out);
+        }
+    }
+    assert_memory_freed(sodium_ctx);
+}
+
+/// `split_enum2_with_deps` has to reach the cell its routing function
+/// captures, and the collector has to be told about it.
+///
+/// The routing function samples `threshold`, which appears nowhere in the
+/// network's shape, so without the declared `Dep` the node's trace would be
+/// missing an edge. `assert_memory_freed` is the half of this that would catch
+/// a trace naming an edge the node does not hold.
+#[test]
+fn split_enum2_with_deps_tracks_a_captured_cell() {
+    init();
+    let mut sodium_ctx = SodiumCtx::new();
+    let sodium_ctx = &mut sodium_ctx;
+    {
+        let sink = sodium_ctx.new_stream_sink::<i32>();
+        let threshold = sodium_ctx.new_cell_sink(10i32).cell();
+
+        let low = Arc::new(Mutex::new(Vec::new()));
+        let high = Arc::new(Mutex::new(Vec::new()));
+        {
+            let t = threshold.clone();
+            let (small, large) = sink.stream().split_enum2_with_deps(
+                move |a| {
+                    if *a < t.sample() {
+                        Enum2::A(*a)
+                    } else {
+                        Enum2::B(*a)
+                    }
+                },
+                vec![threshold.to_dep()],
+            );
+
+            let l1 = {
+                let low = low.clone();
+                small.listen(move |a: &i32| low.lock().unwrap().push(*a))
+            };
+            let l2 = {
+                let high = high.clone();
+                large.listen(move |a: &i32| high.lock().unwrap().push(*a))
+            };
+
+            sink.send(3);
+            sink.send(42);
+
+            assert_eq!(vec![3], *low.lock().unwrap());
+            assert_eq!(vec![42], *high.lock().unwrap());
+
+            l1.unlisten();
+            l2.unlisten();
         }
     }
     assert_memory_freed(sodium_ctx);

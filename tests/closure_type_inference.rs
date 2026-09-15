@@ -23,12 +23,11 @@
 //!   `Vec<Dep>` for the rare case where a closure captures FRP nodes that
 //!   Sodium cannot see.
 //!
-//! The compile-time half lives in `tests/ui.rs` and `tests/ui/`, run with
-//! `trybuild`: it checks the same inference guarantee from outside the crate,
-//! and reduces the *old* failure to a few lines of standalone Rust so the
-//! reasoning below stays checked rather than merely asserted.
+//! The compile-time half lives in `tests/ui.rs` and `tests/ui/bare_closures.rs`,
+//! run with `trybuild`: it checks the same inference guarantee from outside the
+//! crate.
 
-use sodium_rust::{Cell, Dep, Listener, SodiumCtx, Stream};
+use sodium_rust::{Cell, Dep, Enum2, Listener, SodiumCtx, Stream};
 use std::sync::{Arc, Mutex};
 
 /// Test scaffolding: drain a stream into a vector.
@@ -259,6 +258,57 @@ fn with_deps_tracks_cells_captured_by_a_closure() {
     l.unlisten();
 }
 
+/// `split_enum2` routes by a function, so it takes the split like every other
+/// function-taking combinator -- bare closure in the plain form, `Vec<Dep>` in
+/// the sibling. It was left out when the rest of the API was converted.
+#[test]
+fn infers_and_with_deps_cover_split_enum() {
+    let ctx = SodiumCtx::new();
+    let sink = ctx.new_stream_sink::<i32>();
+    let s = sink.stream();
+    let threshold = ctx.new_cell_sink(10i32).cell();
+
+    // Bare closure, no annotation.
+    let (small, large) = s.split_enum2(|a| {
+        if *a < 10 {
+            Enum2::A(*a)
+        } else {
+            Enum2::B(format!("{}", a))
+        }
+    });
+
+    // The same routing decision, taken from a captured cell that the network
+    // shape cannot see.
+    let t = threshold.clone();
+    let (under, over) = s.split_enum2_with_deps(
+        move |a| {
+            if *a < t.sample() {
+                Enum2::A(*a)
+            } else {
+                Enum2::B(*a)
+            }
+        },
+        vec![threshold.to_dep()],
+    );
+
+    let (small_out, l1) = collect(&small);
+    let (large_out, l2) = collect(&large);
+    let (under_out, l3) = collect(&under);
+    let (over_out, l4) = collect(&over);
+
+    sink.send(3);
+    sink.send(42);
+
+    assert_eq!(*small_out.lock().unwrap(), vec![3]);
+    assert_eq!(*large_out.lock().unwrap(), vec!["42".to_string()]);
+    assert_eq!(*under_out.lock().unwrap(), vec![3]);
+    assert_eq!(*over_out.lock().unwrap(), vec![42]);
+
+    for l in [l1, l2, l3, l4] {
+        l.unlisten();
+    }
+}
+
 /// The `*_with_deps` variants exist across the API and all take bare closures.
 ///
 /// Each closure below genuinely captures `bias` and samples it -- which is the
@@ -328,82 +378,25 @@ fn with_deps_variants_infer_too() {
 
 // ---------------------------------------------------------------------------
 //
-// THEORY
-// ======
+// WHY THE API IS SHAPED THIS WAY
+// ==============================
 //
-// Recorded because the fix is a bound change whose motivation is invisible from
-// the diff, and because the `tests/ui/` reductions are only meaningful next to
-// the explanation.
+// The short version: every combinator used to be bounded on
+// `IsLambda1`..`IsLambda6` rather than on `FnMut`, and rustc's closure signature
+// deduction only fires for the `Fn` family. An obligation of the form
+// `?F: IsLambda1<i32, ?B>` yielded no expected signature, so the closure body
+// was checked with its parameter still an unconstrained inference variable and
+// every call site needed an annotation.
 //
-// The problem
-// -----------
-// Every combinator used to be bounded on `IsLambda1`..`IsLambda6` rather than on
-// `FnMut`, and rustc's closure-signature inference does not look through a
-// user-defined trait.
+// The full diagnosis is ADR-0002, in
+// docs/decisions/0002-closure-bounds-and-dependency-declaration.md: why `|a: &_|`
+// was usually but not always enough, why adding `+ FnMut(&A) -> B` to the old
+// bound was not the one-line fix it looks like, and what it would take to
+// collapse the `*_with_deps` siblings back into their base methods. It carries
+// the reductions as Playground experiments, with the rustc version that produced
+// each quoted diagnostic.
 //
-// When rustc sees `s.map(|a| *a + 1)` it must assign a type to `a` *before* it
-// type-checks the closure body. It tries to obtain an "expected signature" from
-// the obligations in scope on the closure's type variable. That deduction
-// (`deduce_closure_signature`) only fires for a fixed set of sources: the
-// `Fn`/`FnMut`/`FnOnce` traits, `AsyncFn*`, and the associated-type projections
-// that go with them. An obligation of the form `?F: IsLambda1<i32, ?B>` is not
-// one of them, so no expected signature was produced.
-//
-// With no expected signature, `a` became a bare inference variable `?T` and the
-// body was checked immediately. `*a` then required knowing that `?T` was
-// dereferenceable, and nothing had said so yet -- hence
-// `error[E0282]: type annotations needed`, pointing at the closure parameter.
-//
-// The information that would have resolved it did exist: selecting the blanket
-// impl `impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN` against
-// `?F: IsLambda1<i32, ?B>` yields `?F: FnMut(&i32) -> ?B`. But that selection
-// happens after the closure body has already been checked, so it arrived too
-// late to inform `a`. Closure signature inference is a pre-pass, not a fixpoint.
-//
-// Why `|a: &_|` used to be enough, and why it sometimes wasn't
-// ------------------------------------------------------------
-// Writing `&_` supplied the one thing the pre-pass could not: the *shape* of the
-// parameter. `a: &'?r ?U` was known to be a reference, so `*a + 1` type-checked
-// as `?U: Add<i32>` without `?U` resolved, and `?U` was filled in later from the
-// trait obligation. The annotation was not carrying the type -- it was carrying
-// the indirection, so that deferred trait selection had something to unify
-// against.
-//
-// That made `&_` a floor, not a guarantee. It worked whenever the body
-// constrained the referent directly. When the body only constrained an
-// associated type of the referent -- `<?U as Neg>::Output == i32` says nothing
-// about `?U`, since `Neg::Output` is not injective -- the referent stayed open
-// and the full `&i32` was needed.
-// `infers_even_when_body_only_constrains_an_associated_type` is that case, and
-// `tests/ui/bare_closures.rs` pins it down from outside the crate.
-//
-// The same reasoning explains the higher-ranked flavour: `FnMut(&A) -> B`
-// desugars to `for<'a> FnMut(&'a A) -> B`, and a closure only gets a late-bound
-// lifetime if rustc knew to give it one -- which again required the expected
-// signature.
-//
-// The fix
-// -------
-// Bound the combinators on `FnMut`/`Fn` directly, and move the
-// dependency-carrying form to a `*_with_deps` sibling that takes `Vec<Dep>` as
-// an explicit argument:
-//
-//     stream.map(|a| *a + 1)
-//     stream.map_with_deps(move |_| cell.sample(), vec![cell.to_dep()])
-//
-// `IsLambda1`..`IsLambda6`, `Lambda` and `lambda1`..`lambda6` are still the
-// mechanism underneath -- `*_with_deps` builds the `Lambda` for you -- but they
-// no longer appear in any public signature and are `#[doc(hidden)]`.
-//
-// Why not just add `+ FnMut(&A) -> B` to the old bounds? Because the extra
-// bound also rejects `Lambda<FN>`, which is a plain struct and cannot implement
-// `FnMut` on stable Rust. That would have broken every deps-carrying call site
-// -- the one thing `IsLambda1` existed to support.
-// `tests/ui/fn_bound_rescues_closure.rs` and
-// `tests/ui/fn_bound_rejects_lambda.rs` assert both halves of that.
-//
-// Making `Lambda<FN>` implement `FnMut` would make the single-bound approach
-// work, and is the cleaner end state, but it needs the unstable
-// `unboxed_closures` and `fn_traits` features.
+// Deliberately not restated here. The record is the owner of this reasoning, and
+// a second copy in a test file is a copy that goes stale.
 //
 // ---------------------------------------------------------------------------

@@ -32,7 +32,21 @@ impl<A: Clone + Send + 'static> Stream<A> {
         C: Clone + Send + 'static,
         FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
     {
-        let (b, c) = self.impl_.split_enum2(f);
+        self.split_enum2_with_deps(f, Vec::new())
+    }
+
+    /// A variant of [`split_enum2`][Stream::split_enum2] that declares
+    /// extra FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn split_enum2_with_deps<B, C, FN>(&self, f: FN, deps: Vec<Dep>) -> (Stream<B>, Stream<C>)
+    where
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+    {
+        let (b, c) = self.impl_.split_enum2(lambda1(f, deps));
 
         let b = Stream { impl_: b };
         let c = Stream { impl_: c };
@@ -46,7 +60,26 @@ impl<A: Clone + Send + 'static> Stream<A> {
         D: Clone + Send + 'static,
         FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
     {
-        let (b, c, d) = self.impl_.split_enum3(f);
+        self.split_enum3_with_deps(f, Vec::new())
+    }
+
+    /// A variant of [`split_enum3`][Stream::split_enum3] that declares
+    /// extra FRP dependencies for the supplied function.
+    ///
+    /// See [`map_with_deps`][Stream::map_with_deps] for when this is
+    /// needed.
+    pub fn split_enum3_with_deps<B, C, D, FN>(
+        &self,
+        f: FN,
+        deps: Vec<Dep>,
+    ) -> (Stream<B>, Stream<C>, Stream<D>)
+    where
+        B: Clone + Send + 'static,
+        C: Clone + Send + 'static,
+        D: Clone + Send + 'static,
+        FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
+    {
+        let (b, c, d) = self.impl_.split_enum3(lambda1(f, deps));
 
         let b = Stream { impl_: b };
         let c = Stream { impl_: c };
