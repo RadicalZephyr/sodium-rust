@@ -54,9 +54,11 @@ fn diagnostics(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/single_impl.rs");
     t.pass("tests/ui/fn_bound_rescues_closure.rs");
     t.compile_fail("tests/ui/fn_bound_rejects_lambda.rs");
-    // `Fn` combinators vs `FnMut` listeners -- see tests/fn_vs_fnmut.rs.
+    // The `Fn` bound on the combinators refusing a closure that captures --
+    // a rejection this crate promises. ADR-0003 argues for the bound; the
+    // compiler behaviour it argues *from* is recorded there as Playground
+    // experiments rather than here.
     t.compile_fail("tests/ui/combinator_rejects_captured_state.rs");
-    t.compile_fail("tests/ui/fnmut_bound_rejects_shared_reference.rs");
 }
 
 #[rustversion::not(stable)]

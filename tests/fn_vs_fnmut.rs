@@ -1,28 +1,21 @@
-//! What the `Fn` bound on the combinators enforces, and what it cost.
+//! The `Fn`/`FnMut` split in the public API, exercised.
 //!
-//! The combinators are bounded on `Fn` and `listen`/`listen_weak` on `FnMut`.
-//! That split is the resolution of [issue #48], which proposed `Fn` throughout
-//! and stalled in 2020 on a counter-argument: that `Stream::map` is
-//! deliberately allowed to mutate, because updating a collection in place is
-//! `O(1)` where rebuilding an immutable one is `O(log n)`, and that this is
-//! "indistinguishable from the immutable collection version in how it
-//! operates".
-//!
-//! Nothing in that thread was measured. These tests are the measurement that
-//! settled it, kept as a live record because the reasoning is not recoverable
-//! from the diff.
+//! The combinators are bounded on `Fn`; `listen` and `listen_weak` are bounded
+//! on `FnMut`. Both halves are a promise to callers, so both are tested here.
 //!
 //! * `combinator_*` -- what the `Fn` bound accepts.
-//! * `listener_*` -- why `listen` deliberately does not follow it.
-//! * `rewrite_*` -- the closure shapes `Fn` rejects, in the form the API
-//!   already had for them. `tests/ui/combinator_rejects_captured_state.rs`
-//!   holds the rejected originals and the diagnostics they now produce.
-//! * `claim_*` -- the `O(1)` collection argument from #48, put on a scale.
-//! * `state_*` -- whether state kept outside the graph stays in step with it.
+//! * `listener_*` -- the handler mutability `listen` deliberately keeps.
+//! * `rewrite_*` -- `accum`/`collect`, the form stateful stream processing
+//!   takes now that a combinator closure cannot own state.
+//! * `state_*` -- evaluation properties a caller can rely on.
 //!
-//! `FINDINGS` at the bottom collects the conclusions.
-//!
-//! [issue #48]: https://github.com/SodiumFRP/sodium-rust/issues/48
+//! Why the split is shaped this way, what it cost, and the alternatives that
+//! were turned down are in
+//! [ADR-0003](../docs/decisions/0003-fn-bounds-on-combinators.md) -- this file
+//! is not a second copy of that argument. The measurement the record's central
+//! claim rests on is `docs/decisions/research/src/bin/0003-collection-drift.rs`,
+//! and the rejection half of the contract is
+//! `tests/ui/combinator_rejects_captured_state.rs`.
 
 use sodium_rust::{Cell, Listener, Operational, SodiumCtx, Stream};
 use std::collections::HashMap;
@@ -417,128 +410,7 @@ fn rewrite_makes_the_state_first_class() {
 }
 
 // ---------------------------------------------------------------------------
-// Part 4: the argument from #48, measured.
-//
-// The case for keeping `FnMut` was a mutable collection updated in place:
-//
-//     let mut myEntities = HashMap::<Entity>::new();
-//     let cEntities = sChange.map(move |change| { /* apply */; myEntities });
-//
-// -- `O(1)` per update instead of `O(log n)`, and claimed to be
-// "indistinguishable from the immutable collection version in how it operates",
-// because downstream nodes receive only a shared reference.
-//
-// The test of "indistinguishable" is whether a value handed to an observer in
-// transaction N still reads, later, as it did in transaction N. That is the
-// property an immutable collection gives for free. The two tests below take
-// each variant of the trick and check exactly that.
-//
-// Both are written with interior mutability, because both have to be: a
-// combinator's return type is owned (`B: Clone + Send + 'static`), so a closure
-// can never lend out a borrow of its own state whatever the bound. That is why
-// this section survived the change to `Fn` unaltered in substance -- the trick
-// was never a `FnMut` capability.
-// ---------------------------------------------------------------------------
-
-/// Sizes recorded at event time, the values themselves, and the listener
-/// keeping the probe alive.
-type SizeProbe<M> = (Arc<Mutex<Vec<usize>>>, Arc<Mutex<Vec<M>>>, Listener);
-
-/// Record, for each event, the collection's size *at the time of the event*,
-/// and keep the value so the same measurement can be repeated at the end. If
-/// the two disagree, values are changing under observers that already have
-/// them.
-fn size_probe<M, F>(s: &Stream<M>, size_of: F) -> SizeProbe<M>
-where
-    M: Clone + Send + 'static,
-    F: Fn(&M) -> usize + Send + Sync + 'static,
-{
-    let at_event: Arc<Mutex<Vec<usize>>> = Default::default();
-    let kept: Arc<Mutex<Vec<M>>> = Default::default();
-    let (a, k) = (at_event.clone(), kept.clone());
-    let l = s.listen(move |m| {
-        a.lock().unwrap().push(size_of(m));
-        k.lock().unwrap().push(m.clone());
-    });
-    (at_event, kept, l)
-}
-
-/// Variant A: return the collection by value, as the #48 sketch does.
-///
-/// Semantically correct -- past values do not move. But the collection has to
-/// be copied out on every event to produce the owned return value, which is
-/// `O(n)`: worse than the `O(log n)` the trick was introduced to beat.
-#[test]
-fn claim_owned_collection_is_correct_but_copies() {
-    let ctx = SodiumCtx::new();
-    let sink = ctx.new_stream_sink::<(String, i32)>();
-
-    let table: Arc<Mutex<HashMap<String, i32>>> = Default::default();
-    let t = table.clone();
-    let updated = sink.stream().map(move |(k, v): &(String, i32)| {
-        let mut table = t.lock().unwrap();
-        table.insert(k.clone(), *v);
-        table.clone() // <-- the O(n) the trick was meant to avoid
-    });
-
-    let (at_event, kept, l) = size_probe(&updated, |m: &HashMap<String, i32>| m.len());
-
-    sink.send(("a".into(), 1));
-    sink.send(("b".into(), 2));
-    sink.send(("c".into(), 3));
-
-    let later: Vec<usize> = kept.lock().unwrap().iter().map(|m| m.len()).collect();
-    assert_eq!(*at_event.lock().unwrap(), vec![1, 2, 3]);
-    assert_eq!(later, vec![1, 2, 3], "past values must not move");
-    l.unlisten();
-}
-
-/// Variant B: the `O(1)` version. Hand downstream a shared handle to the one
-/// live collection, so nothing is copied.
-///
-/// This is what the trick has to become once the return type is owned -- a
-/// conclusion clinuxrulz reached himself in #48, immediately before saying he
-/// would be happy to move to `Fn`. It is `O(1)`, and it breaks the property the
-/// trick was claimed to preserve: every observer ends up looking at the final
-/// state, whatever transaction it observed in.
-#[test]
-fn claim_shared_collection_is_o1_but_values_drift() {
-    let ctx = SodiumCtx::new();
-    let sink = ctx.new_stream_sink::<(String, i32)>();
-
-    let table: Arc<Mutex<HashMap<String, i32>>> = Default::default();
-    let t = table.clone();
-    let updated = sink.stream().map(move |(k, v): &(String, i32)| {
-        t.lock().unwrap().insert(k.clone(), *v);
-        t.clone() // O(1): clones the Arc, not the map
-    });
-
-    let (at_event, kept, l) = size_probe(&updated, |m: &Arc<Mutex<HashMap<String, i32>>>| {
-        m.lock().unwrap().len()
-    });
-
-    sink.send(("a".into(), 1));
-    sink.send(("b".into(), 2));
-    sink.send(("c".into(), 3));
-
-    let later: Vec<usize> = kept
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|m| m.lock().unwrap().len())
-        .collect();
-
-    assert_eq!(*at_event.lock().unwrap(), vec![1, 2, 3]);
-    assert_eq!(
-        later,
-        vec![3, 3, 3],
-        "the first two observers' values grew after they received them"
-    );
-    l.unlisten();
-}
-
-// ---------------------------------------------------------------------------
-// Part 5: does state kept outside the graph stay in step with it?
+// Part 4: evaluation properties a caller can rely on.
 //
 // A combinator closure's `Arc<Mutex<_>>` is invisible to Sodium, so it advances
 // exactly as often as the node happens to be evaluated. Whether that matches
@@ -679,79 +551,3 @@ fn state_advances_while_switched_away() {
     assert_eq!(*calls.lock().unwrap(), 4);
     l.unlisten();
 }
-
-// ---------------------------------------------------------------------------
-//
-// FINDINGS
-// ========
-//
-// Recorded here because the question in #48 was a design question, and the
-// tests above are only evidence if what they were weighing is written down next
-// to them.
-//
-// 1. The bound was load-bearing in exactly one place.
-//
-//    Before the change, `src/stream.rs` and `src/cell.rs` carried 46 `FnMut`
-//    bounds: 38 on combinators, 8 on the listeners. Nothing in this repository
-//    -- 52 unit tests, the integration tests, the benchmarks, `coz-driver` --
-//    passed a mutable-capture closure to a combinator. The benchmarks passed 18
-//    of them to `listen`.
-//
-//    So the two halves of the API wanted different answers, which is what
-//    RadicalZephyr proposed in the opening comment of #48: `Fn` for the
-//    combinators, a mutable bound for the effectful edge. That is what the API
-//    now has, and Parts 1 and 2 are the two halves.
-//
-// 2. Type inference does not depend on the choice.
-//
-//    `Fn` and `FnMut` are both in the family rustc deduces closure signatures
-//    from, so everything `tests/closure_type_inference.rs` guards holds either
-//    way. The bound change and the inference fix were independent.
-//
-// 3. The argument that stalled the thread does not survive being measured.
-//
-//    Part 4 is the O(1)-collection claim. Returned by value it is correct and
-//    `O(n)` -- worse than the immutable collection it was meant to beat, since
-//    a combinator's return type is owned and a closure cannot lend out its own
-//    state. Returned as a shared handle it is `O(1)` and its values drift: in
-//    `claim_shared_collection_is_o1_but_values_drift` the observers of events 1
-//    and 2 both end up holding a three-entry map. That is precisely the
-//    "indistinguishable from the immutable version" property the trick claimed.
-//
-//    Neither result depended on the bound. Both variants are `Fn` and always
-//    were -- the constraint that defeats the trick is the owned return type,
-//    which nothing in #48 proposed changing.
-//
-// 4. What the `Fn` bound cost was five closure shapes, four of which rewrite
-//    exactly.
-//
-//    Part 3 is the bill, and `tests/ui/combinator_rejects_captured_state.rs` is
-//    the itemisation. Counter, window, edge-detect and RNG all thread through
-//    `accum`/`collect` with the output their captured versions produced, and
-//    come out better for it: `rewrite_makes_the_state_first_class` shows the
-//    state becoming a `Cell` that can be sampled and composed, where a capture
-//    is visible to nobody. Only the memo cache has no natural rewrite, and it
-//    is a cache -- an implementation detail that does not belong in the graph,
-//    and that wants `Arc<Mutex<_>>` the moment it is shared.
-//
-// 5. There was a reason to prefer `Fn` beyond taste.
-//
-//    Each node's update used to be stored as
-//    `RwLock<Box<dyn FnMut() + Send + Sync>>`, so firing one took a *write*
-//    lock. A `Fn` graph makes that a read lock. `SodiumCtx` already carries a
-//    `ThreadedMode` and a `TODO` for a thread-pool mode, and a per-node
-//    exclusive lock on every fire was what stood between that scaffolding and
-//    an evaluator that can run independent nodes at once.
-//
-//    Still prospective, not a present win: `simple_threaded_mode` spawns and
-//    immediately joins, so today's evaluator is serialized and the lock is
-//    uncontended either way.
-//
-// 6. `listen` keeps `FnMut` without the graph keeping it.
-//
-//    The two halves did not have to be traded off. A `Mutex` at the API
-//    boundary absorbs a handler's mutability -- `listen` accepts `FnMut`, wraps
-//    it, and hands the graph a `Fn` -- which left the internals free to be
-//    `dyn Fn` and kept all 18 benchmark handlers compiling untouched. Part 2
-//    is the check that this is real and not merely type-level.
-// ---------------------------------------------------------------------------
