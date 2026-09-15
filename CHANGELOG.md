@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since they appear in the public `*_with_deps` signatures.
 - `Cell::listen_weak` now honours declared dependencies, matching
   `Stream::listen_weak` and `Cell::listen`.
+- `impl_::Stream::split_filter` now honours declared dependencies. It is bounded
+  on `IsLambda1`, so a caller reaching through `impl_` could always hand it a
+  `Lambda`, and the deps it carried were dropped on the floor.
 
 ### Added
 
@@ -50,6 +53,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `accum_lazy_with_deps`, `listen_with_deps`, `listen_weak_with_deps`, and
   `Cell::map_with_deps`, `lift2_with_deps`..`lift6_with_deps`,
   `listen_with_deps`, `listen_weak_with_deps`.
+- `Stream::split_enum2_with_deps` and `Stream::split_enum3_with_deps`. These were
+  missed when the rest of the API gained its `*_with_deps` siblings: both
+  combinators route by a function, so a routing closure that samples a captured
+  `Cell` needs the same escape hatch as `map`.
 
 ## [2.1.3] - 2026-09-02
 

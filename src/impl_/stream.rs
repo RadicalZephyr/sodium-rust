@@ -608,6 +608,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
         {
             let weak_sa = Stream::downgrade(&sa);
             let weak_sb = Stream::downgrade(&sb);
+            let f_deps = lambda1_deps(&pred);
 
             node = Node::new(
                 &sodium_ctx,
@@ -635,6 +636,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                 },
                 vec![self.box_clone()],
             );
+            node.add_update_dependencies(f_deps);
             node.add_update_dependencies(vec![self.to_dep()]);
         };
         sa.node().data().dependencies.write().push(node.box_clone());
@@ -643,11 +645,11 @@ impl<A: Clone + Send + 'static> Stream<A> {
         (sa, sb)
     }
 
-    pub fn split_enum2<B, C, FN>(&self, f: FN) -> (Stream<B>, Stream<C>)
+    pub fn split_enum2<B, C, FN>(&self, mut f: FN) -> (Stream<B>, Stream<C>)
     where
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum2<B, C> + Send + Sync + 'static,
+        FN: IsLambda1<A, Enum2<B, C>> + Send + Sync + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         let sodium_ctx2 = sodium_ctx.clone();
@@ -660,13 +662,15 @@ impl<A: Clone + Send + 'static> Stream<A> {
         {
             let weak_sa = Stream::downgrade(&sa);
             let weak_sb = Stream::downgrade(&sb);
+            let f_deps = lambda1_deps(&f);
 
             node = Node::new(
                 &sodium_ctx,
                 NodeName::Router,
                 move || {
-                    let firing_op = self_
-                        .with_firing_op(|firing_op: &mut Option<A>| firing_op.as_ref().map(&f));
+                    let firing_op = self_.with_firing_op(|firing_op: &mut Option<A>| {
+                        firing_op.as_ref().map(|a: &A| f.call(a))
+                    });
                     if let Some(dispatch) = firing_op {
                         match dispatch {
                             Enum2::A(a) => {
@@ -690,6 +694,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                 },
                 vec![self.box_clone()],
             );
+            node.add_update_dependencies(f_deps);
             node.add_update_dependencies(vec![self.to_dep()]);
         };
         sa.node().data().dependencies.write().push(node.box_clone());
@@ -698,12 +703,12 @@ impl<A: Clone + Send + 'static> Stream<A> {
         (sa, sb)
     }
 
-    pub fn split_enum3<B, C, D, FN>(&self, f: FN) -> (Stream<B>, Stream<C>, Stream<D>)
+    pub fn split_enum3<B, C, D, FN>(&self, mut f: FN) -> (Stream<B>, Stream<C>, Stream<D>)
     where
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
-        FN: Fn(&A) -> Enum3<B, C, D> + Send + Sync + 'static,
+        FN: IsLambda1<A, Enum3<B, C, D>> + Send + Sync + 'static,
     {
         let sodium_ctx = self.sodium_ctx();
         let sodium_ctx2 = sodium_ctx.clone();
@@ -718,13 +723,15 @@ impl<A: Clone + Send + 'static> Stream<A> {
             let weak_sa = Stream::downgrade(&sa);
             let weak_sb = Stream::downgrade(&sb);
             let weak_sc = Stream::downgrade(&sc);
+            let f_deps = lambda1_deps(&f);
 
             node = Node::new(
                 &sodium_ctx,
                 NodeName::Router,
                 move || {
-                    let firing_op = self_
-                        .with_firing_op(|firing_op: &mut Option<A>| firing_op.as_ref().map(&f));
+                    let firing_op = self_.with_firing_op(|firing_op: &mut Option<A>| {
+                        firing_op.as_ref().map(|a: &A| f.call(a))
+                    });
                     if let Some(dispatch) = firing_op {
                         match dispatch {
                             Enum3::A(a) => {
@@ -756,6 +763,7 @@ impl<A: Clone + Send + 'static> Stream<A> {
                 },
                 vec![self.box_clone()],
             );
+            node.add_update_dependencies(f_deps);
             node.add_update_dependencies(vec![self.to_dep()]);
         };
         sa.node().data().dependencies.write().push(node.box_clone());

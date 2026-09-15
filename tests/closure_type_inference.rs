@@ -27,7 +27,7 @@
 //! run with `trybuild`: it checks the same inference guarantee from outside the
 //! crate.
 
-use sodium_rust::{Cell, Dep, Listener, SodiumCtx, Stream};
+use sodium_rust::{Cell, Dep, Enum2, Listener, SodiumCtx, Stream};
 use std::sync::{Arc, Mutex};
 
 /// Test scaffolding: drain a stream into a vector.
@@ -256,6 +256,57 @@ fn with_deps_tracks_cells_captured_by_a_closure() {
 
     assert_eq!(*seen.lock().unwrap(), vec!["a1", "b0", "b1", "a1", "a2"]);
     l.unlisten();
+}
+
+/// `split_enum2` routes by a function, so it takes the split like every other
+/// function-taking combinator -- bare closure in the plain form, `Vec<Dep>` in
+/// the sibling. It was left out when the rest of the API was converted.
+#[test]
+fn infers_and_with_deps_cover_split_enum() {
+    let ctx = SodiumCtx::new();
+    let sink = ctx.new_stream_sink::<i32>();
+    let s = sink.stream();
+    let threshold = ctx.new_cell_sink(10i32).cell();
+
+    // Bare closure, no annotation.
+    let (small, large) = s.split_enum2(|a| {
+        if *a < 10 {
+            Enum2::A(*a)
+        } else {
+            Enum2::B(format!("{}", a))
+        }
+    });
+
+    // The same routing decision, taken from a captured cell that the network
+    // shape cannot see.
+    let t = threshold.clone();
+    let (under, over) = s.split_enum2_with_deps(
+        move |a| {
+            if *a < t.sample() {
+                Enum2::A(*a)
+            } else {
+                Enum2::B(*a)
+            }
+        },
+        vec![threshold.to_dep()],
+    );
+
+    let (small_out, l1) = collect(&small);
+    let (large_out, l2) = collect(&large);
+    let (under_out, l3) = collect(&under);
+    let (over_out, l4) = collect(&over);
+
+    sink.send(3);
+    sink.send(42);
+
+    assert_eq!(*small_out.lock().unwrap(), vec![3]);
+    assert_eq!(*large_out.lock().unwrap(), vec!["42".to_string()]);
+    assert_eq!(*under_out.lock().unwrap(), vec![3]);
+    assert_eq!(*over_out.lock().unwrap(), vec![42]);
+
+    for l in [l1, l2, l3, l4] {
+        l.unlisten();
+    }
 }
 
 /// The `*_with_deps` variants exist across the API and all take bare closures.

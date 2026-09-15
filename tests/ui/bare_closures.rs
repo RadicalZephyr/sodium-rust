@@ -4,12 +4,28 @@
 // This is the regression guard for the `FnMut`/`Fn` bounds. If any of these
 // methods is moved back onto an `IsLambda`-style bound, this stops compiling.
 
-use sodium_rust::{Cell, Dep, Listener, Stream};
+use sodium_rust::{Cell, Dep, Enum2, Enum3, Listener, Stream};
 
 pub fn chained(s: &Stream<i32>) -> Stream<i32> {
     s.map(|a| *a + 1)
         .filter(|a| *a % 2 == 0)
         .filter_map(|a| Some(*a * 3))
+}
+
+pub fn routed(s: &Stream<i32>) -> (Stream<i32>, Stream<i32>, Stream<i32>) {
+    let (small, large) = s.split_enum2(|a| {
+        if *a < 10 {
+            Enum2::A(*a)
+        } else {
+            Enum2::B(*a)
+        }
+    });
+    let (_neg, _zero, pos) = s.split_enum3(|a| match *a {
+        n if n < 0 => Enum3::A(n),
+        0 => Enum3::B(0),
+        n => Enum3::C(n),
+    });
+    (small, large, pos)
 }
 
 pub fn merged(s: &Stream<i32>, t: &Stream<i32>) -> Stream<i32> {
@@ -74,6 +90,21 @@ pub fn listened(s: &Stream<i32>, c: &Cell<i32>) -> Vec<Listener> {
 }
 
 // The `*_with_deps` siblings infer just the same.
+pub fn routed_with_deps(s: &Stream<i32>, c: &Cell<i32>) -> (Stream<i32>, Stream<i32>) {
+    let deps: Vec<Dep> = vec![c.to_dep()];
+    let c = c.clone();
+    s.split_enum2_with_deps(
+        move |a| {
+            if *a < c.sample() {
+                Enum2::A(*a)
+            } else {
+                Enum2::B(*a)
+            }
+        },
+        deps,
+    )
+}
+
 pub fn with_deps(s: &Stream<i32>, c: &Cell<i32>) -> Stream<i32> {
     let deps: Vec<Dep> = vec![c.to_dep()];
     let captured = c.clone();

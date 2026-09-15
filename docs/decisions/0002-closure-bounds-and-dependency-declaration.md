@@ -242,7 +242,7 @@ That is the decision below, down to the `Vec<Dep>` parameter; only the name move
 question too -- "It's just delegating the 'non with deps' method calls to the
 'with dep' ones carrying an empty `Vec` of deps" -- which is exactly what the base
 methods do today. Even the cost is his: *just a bit painful with all the
-boilerplate* is the 23 siblings, priced correctly on sight.
+boilerplate* is the 25 siblings, priced correctly on sight.
 
 So the six years are not a story about an idea nobody had. They are a story about
 an idea nobody could **choose**, because it was the expensive option on a list
@@ -250,7 +250,7 @@ with two cheaper-looking ones and no way to eliminate either:
 
 - **`Fn(...) + Deps`** -- RadicalZephyr's proposal the same day: move `deps_op`
   into a trait of its own and bound on the combination. One extra bound on the
-  methods that exist, instead of 23 new ones.
+  methods that exist, instead of 25 new ones.
 - **`impl Fn for Lambda`** -- clinuxrulz's question the same day, "Will Rust let
   us implement `Fn` or `FnMut` for our own types anyway? Such as `Lambda`?",
   which would have dissolved the problem entirely.
@@ -343,7 +343,7 @@ Split the API by shape -- clinuxrulz's twin methods from 2020, built.
 - Every function-taking combinator is bounded on `FnMut`/`Fn` directly, so bare
   closures infer: `stream.map(|a| *a + 1)`.
 - Every one of them gains a `*_with_deps` sibling taking an explicit `Vec<Dep>`
-  -- 23 methods across `Stream` and `Cell`. The base method delegates to its
+  -- 25 methods across `Stream` and `Cell`. The base method delegates to its
   sibling with an empty `Vec`, so there is one implementation per combinator.
 - `IsLambda1`..`IsLambda6`, `Lambda` and `lambda1`..`lambda6` remain the
   mechanism underneath, and the traits join the rest of it behind
@@ -373,9 +373,11 @@ implement it for both `Lambda` and bare functions, and bound the combinators on
 `Fn(...) + Deps`. The reduction below tests the same shape in the form closest to
 what this crate actually had, `IsLambda1<A, B> + FnMut(&A) -> B`, because the
 question it settles -- what happens to `Lambda` when an `Fn`-family bound is in
-the list -- does not care which trait carries `deps_op` or how many there are. It is the cheap option -- one extra bound against 23 new
-methods -- and it went six years without anyone establishing whether it works. It
-half does. The first half works, which is what kept it alive:
+the list -- does not care which trait carries `deps_op` or how many there are.
+
+It is the cheap option, one extra bound against 25 new methods, and it went six
+years without anyone establishing whether it works. It half does, and the half
+that works is what kept it alive:
 
 **Experiment -- the extra bound rescues the closure and rejects the `Lambda`**
 
@@ -846,7 +848,7 @@ version, issue #14 carried the 3.0 milestone from 2024, and the price was never
 in dispute at any point in between. The change is unreleased at the time of
 writing -- the crate is at 2.1.3 and the entry is under `Unreleased`.
 
-**The function-taking surface doubles.** 23 base methods gained 23 siblings, all
+**The function-taking surface doubles.** 25 base methods gained 25 siblings, all
 of which appear in rustdoc, and `map` now sorts next to `map_to` and
 `map_with_deps`. This is a real cost, it lands on the reader of the documentation,
 and it is the cost clinuxrulz named in the same breath as the design -- *just a
@@ -857,6 +859,23 @@ onto the method index, where it is charged once to whoever is reading it -- and
 the alternative was charging every call site for a feature few call sites use.
 It is still the cost most likely to be regretted, and the one that disappears if
 `fn_traits` ever stabilises.
+
+**`split_enum2` and `split_enum3` were missed, and are now included.** The
+original change left them bounded on `Fn` in *both* layers, building their nodes
+without consulting a `Lambda`, so there was nowhere for a dependency to enter: a
+routing closure that sampled a captured `Cell` had no way to say so. That was an
+oversight rather than a judgement -- they are function-taking combinators like any
+other -- and it survived because they had no test coverage at all, which also made
+`tests/ui/bare_closures.rs` false where it claimed to exercise every
+function-taking combinator. They now take `IsLambda1` at the implementation layer
+like their neighbours, and have `split_enum2_with_deps` and
+`split_enum3_with_deps` siblings; the counts above include them.
+
+Wiring that up surfaced the same bug one level down. `impl_::Stream::split_filter`
+is bounded on `IsLambda1`, so a caller reaching through `impl_` can hand it a
+`Lambda` carrying deps, and it never called `lambda1_deps` -- the declared
+dependencies went nowhere. That is `Cell::listen_weak` again, in a method with no
+callers and no tests, and it is fixed here.
 
 **The capability is now visible in the method list.** Whether a combinator can
 take dependencies used to be a fact about a trait bound; it is now a fact about
@@ -925,15 +944,6 @@ distinction above is between kinds of case rather than a ban -- a case that pins
 a rejection this crate promises still needs somewhere gated to sit.
 
 ## Open questions
-
-**`split_enum2` and `split_enum3` have no dependency path at all.** They are
-bounded on `Fn` in both layers and build their nodes without consulting a
-`Lambda`, so there is nowhere for deps to enter -- they were already outside the
-old scheme and they are outside the new one. A closure passed to `split_enum2`
-that captures a `Cell` and samples it has no way to say so. Whether this is a gap
-to close with two more siblings or a sign that these combinators want a different
-treatment, we have not worked out; the change did not touch them and this record
-is not deciding it.
 
 **The bad-diagnostics thread was never pulled.** Issue #14 also said that "in
 some cases the error messages when you have incorrect types are actually quite
@@ -1024,7 +1034,7 @@ does not touch. Where the text above says a combinator is bounded on
 check rather than trust it.
 
 **Whether stabilisation should collapse the API back.** If `unboxed_closures`
-and `fn_traits` stabilise, `Lambda<FN>` can implement `FnMut` and the 23 siblings
+and `fn_traits` stabilise, `Lambda<FN>` can implement `FnMut` and the 25 siblings
 can go away. That would be a superseding record rather than an edit to this one:
 someone following the decision above would then be adding methods that should not
 exist. It would also be a second breaking change to the same surface, and whether
