@@ -220,7 +220,63 @@ constrained an associated type of it -- `<?U as Neg>::Output == i32` says nothin
 about `?U`, because `Neg::Output` is not injective. There the full `&i32` was
 needed. `infers_even_when_body_only_constrains_an_associated_type` in
 [`tests/closure_type_inference.rs`](../../tests/closure_type_inference.rs) is that
-case, now passing with no annotation at all.
+case, now passing with no annotation at all -- and the reduction below is the same
+distinction in a form that does not need this crate.
+
+**Experiment -- `&_` is a floor, not a guarantee**
+
+```rust
+pub trait IsLambda1<A, B> {
+    fn call(&mut self, a: &A) -> B;
+}
+
+impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
+    fn call(&mut self, a: &A) -> B {
+        self(a)
+    }
+}
+
+pub struct Stream<A>(A);
+
+impl<A> Stream<A> {
+    // The shape `Stream::map` used to have.
+    pub fn map_via_trait<B, F: IsLambda1<A, B>>(&self, _f: F) {}
+}
+
+fn sink(_: i32) {}
+
+fn main() {
+    let s = Stream(1i32);
+
+    // `&_` supplies the one thing the pre-pass could not: the shape of the
+    // parameter. The body then constrains the referent directly -- `?U` has to
+    // add with an integer -- and `?U` is filled in later from the obligation.
+    s.map_via_trait(|a: &_| sink(*a + 1));
+
+    // The same annotation, and now it is not enough. `-*a` says only
+    // `<?U as Neg>::Output == i32`, and `Neg::Output` is not injective, so
+    // nothing pins `?U` down.
+    s.map_via_trait(|a: &_| sink(-*a));
+}
+```
+
+```text
+error[E0282]: type annotations needed
+  --> src/main.rs:31:34
+   |
+31 |     s.map_via_trait(|a: &_| sink(-*a));
+   |                                  ^^^ cannot infer type
+```
+
+> rustc 1.98.1 (released 2026-09-01) - output checked 2026-09-15 - [Rust Playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=826738590cd55fde38895c3327e53497)
+
+One error, and it is the second call. The two closures carry the *same*
+annotation and differ only in what their bodies say about the referent, which is
+what makes the annotation burden unpredictable rather than merely verbose: there
+is no rule a caller can follow short of writing the concrete type every time. The
+error also does not name `&_` as the problem, so the natural response to it is to
+widen the annotation and move on, which is how the real cause stayed hidden for as
+long as it did.
 
 ## Why this took six years
 
@@ -468,62 +524,118 @@ said so.
 `Lambda`? Last time I tried, Rust would not let me" -- then found the `Fn` impls
 for `Box<dyn Fn>` added in Rust 1.35 and took them for general permission.
 RadicalZephyr corrected it three days later: those are impls *on* a std type, and
-writing your own is still gated. This is the clean end state, and worth being
-precise about, because it is the alternative most likely to become available. It collapses the whole problem: with those impls, a single `FnMut`
-bound accepts a bare closure and a `Lambda` alike, so there is no split and no
-`*_with_deps`. It needs `unboxed_closures` and `fn_traits`.
+writing your own is still gated.
 
-**Experiment -- the collapsed design, and what blocks it**
+The appeal is that it dissolves the previous alternative rather than replacing
+it. `IsLambda1<A, B> + FnMut(&A) -> B` rejected `Lambda` only because `Lambda`
+was not callable; make it callable and the same bound takes both shapes, so there
+is no split and no `*_with_deps`. This record called that the clean end state
+until the experiment was run.
+
+**Experiment -- making `Lambda` callable is necessary and not sufficient**
 
 ```rust
 #![feature(unboxed_closures, fn_traits)]
+
+pub trait IsLambda1<A, B> {
+    fn call(&mut self, a: &A) -> B;
+    fn deps(&self) -> usize;
+}
 
 pub struct Lambda<FN> {
     pub f: FN,
     pub deps: usize,
 }
 
-impl<FN: FnMut(&i32) -> i32> FnOnce<(&i32,)> for Lambda<FN> {
+impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for Lambda<FN> {
+    fn call(&mut self, a: &A) -> B {
+        (self.f)(a)
+    }
+    fn deps(&self) -> usize {
+        self.deps
+    }
+}
+
+impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
+    fn call(&mut self, a: &A) -> B {
+        self(a)
+    }
+    fn deps(&self) -> usize {
+        0
+    }
+}
+
+// The two impls stable Rust will not let us write. With them `Lambda` is
+// callable, so it satisfies the `FnMut` half of the bound below -- which is the
+// exact bound the previous experiment showed rejecting it.
+impl<'a, FN: FnMut(&i32) -> i32> FnOnce<(&'a i32,)> for Lambda<FN> {
     type Output = i32;
-    extern "rust-call" fn call_once(mut self, args: (&i32,)) -> i32 {
+    extern "rust-call" fn call_once(mut self, args: (&'a i32,)) -> i32 {
         (self.f)(args.0)
     }
 }
 
-impl<FN: FnMut(&i32) -> i32> FnMut<(&i32,)> for Lambda<FN> {
-    extern "rust-call" fn call_mut(&mut self, args: (&i32,)) -> i32 {
+impl<'a, FN: FnMut(&i32) -> i32> FnMut<(&'a i32,)> for Lambda<FN> {
+    extern "rust-call" fn call_mut(&mut self, args: (&'a i32,)) -> i32 {
         (self.f)(args.0)
     }
 }
 
-// With those impls, one bound accepts both shapes.
-pub fn map<F: FnMut(&i32) -> i32>(_f: F) {}
+pub struct Stream<A>(A);
+
+impl<A> Stream<A> {
+    // Unchanged from the previous experiment. One method, no `map_with_deps`.
+    pub fn map<B, F: IsLambda1<A, B> + FnMut(&A) -> B>(&self, mut f: F) -> (B, usize) {
+        (f.call(&self.0), f.deps())
+    }
+}
 
 fn main() {
-    map(|a| *a + 1);
-    map(Lambda {
-        f: |a: &i32| *a + 1,
-        deps: 3,
-    });
+    let s = Stream(41i32);
+    println!("bare closure -> {:?}", s.map(|a| *a + 1));
+    println!(
+        "Lambda       -> {:?}",
+        s.map(Lambda {
+            f: |a: &i32| *a + 1,
+            deps: 3,
+        })
+    );
 }
 ```
 
 ```text
-error[E0554]: `#![feature]` may not be used on the stable release channel
- --> src/main.rs:1:1
-  |
-1 | #![feature(unboxed_closures, fn_traits)]
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error[E0119]: conflicting implementations of trait `IsLambda1<i32, i32>` for type `Lambda<_>`
+  --> src/main.rs:22:1
+   |
+13 | impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for Lambda<FN> {
+   | ------------------------------------------------------------- first implementation here
+...
+22 | impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ conflicting implementation for `Lambda<_>`
 ```
 
-> rustc 1.98.1 (released 2026-09-01) - output checked 2026-09-14 - [Rust Playground](https://play.rust-lang.org/?version=stable&mode=debug&edition=2021&gist=2e9a07756dac9e163e53362cb6620a1e)
+> rustc 1.100.0-nightly (released 2026-09-14) - output checked 2026-09-15 - [Rust Playground](https://play.rust-lang.org/?version=nightly&mode=debug&edition=2021&gist=8ad81dc40a0b5ca6c526890c8e77c1b8)
 
-Nothing is wrong with the implementation -- the same file compiles and runs on
-nightly 1.100.0 (2026-09-13, checked 2026-09-14). The gate is the whole
-objection, and a library whose MSRV is 1.71 cannot take it. Six years after
-RadicalZephyr wrote that it "doesn't really look like it's even ready to be
-stabilized any time soon", that assessment has held, which is the most useful
-thing this experiment says: the option is not arriving on its own.
+That is on **nightly**, with both features enabled, and nothing in the output
+mentions them: `unboxed_closures` and `fn_traits` do exactly what they promise.
+Checked separately on nightly 1.100.0 (2026-09-14), the two `Fn`-family impls
+alone are accepted and `Lambda` satisfies a plain `FnMut` bound. The feature gate
+is genuinely the only thing stable withholds.
+
+What breaks is coherence, and it breaks *because* the impls work. The blanket
+`impl<A, B, FN: FnMut(&A) -> B> IsLambda1<A, B> for FN` is what lets a bare
+closure be an `IsLambda1` at all. Once `Lambda<FN>` is `FnMut`, that blanket impl
+covers `Lambda<FN>` too, and it conflicts with the specific impl that is the only
+reason `Lambda` exists. The two `IsLambda1` impls coexist today only because
+`Lambda` is *not* callable -- the property this alternative sets out to change.
+
+So the end state needs more than the two features it is usually described as
+needing. Dropping the blanket impl loses bare closures; dropping the specific one
+loses the deps; keeping both needs `specialization` or negative impls, each
+unstable in its own right. Six years after RadicalZephyr wrote that `fn_traits`
+"doesn't really look like it's even ready to be stabilized any time soon", that
+assessment has held -- and the useful thing this experiment adds is that even its
+arrival would not be enough on its own.
 
 **Declare dependencies after construction**, as `stream.map(f).with_deps(...)`.
 Mechanically this is available: `Node::add_update_dependencies` exists and
@@ -857,8 +969,9 @@ did not turn one up. Against issue #14's ratio, that is the trade we chose: cere
 moves off the call sites, where it was charged to everyone on every closure, and
 onto the method index, where it is charged once to whoever is reading it -- and
 the alternative was charging every call site for a feature few call sites use.
-It is still the cost most likely to be regretted, and the one that disappears if
-`fn_traits` ever stabilises.
+It is still the cost most likely to be regretted, and the one that would
+disappear if the collapsed design above ever became reachable -- which, on the
+evidence of its experiment, is further off than a single feature gate.
 
 **`split_enum2` and `split_enum3` were missed, and are now included.** The
 original change left them bounded on `Fn` in *both* layers, building their nodes
@@ -930,12 +1043,15 @@ still failed `fn_bound_rejects_lambda` on the article in `expected a` versus
 `expected an`.
 
 So the reductions move here, as Playground experiments, and leave the test suite.
-Three of the experiments are new. The one on `fn_traits` was a claim in a commit
-message with nothing behind it, and is the claim in this record most likely to
-expire. The two on automatic dependency discovery answer 2020 proposals
-that nobody answered at the time -- one of them by contradicting what this record
-first assumed about it -- which is the other thing a record is for: a rejected
-alternative stays rejected only while the reason is on file and checkable.
+Four of the experiments are new, and three of those four changed a claim this
+record had already made. The `fn_traits` one was a commit message's assertion with
+nothing behind it, and running it showed the collapsed design failing on coherence
+rather than on the feature gate everyone names. The two on automatic dependency
+discovery answer 2020 proposals nobody answered at the time, one of them by
+contradicting what this record first assumed. Only the `&_` reduction merely
+confirmed what was already written. That ratio is the argument for the convention:
+a rejected alternative stays rejected only while the reason is on file and
+checkable, and three of these reasons were wrong until they were run.
 `tests/ui/bare_closures.rs` stays: it exercises every function-taking combinator
 with an unannotated closure from outside the crate, which is a property we do
 promise, and it carries no expected output, so it runs on every channel. The
@@ -1033,10 +1149,17 @@ does not touch. Where the text above says a combinator is bounded on
 "`FnMut`/`Fn`", that describes `main` as of 2026-09-14, and #34 is the reason to
 check rather than trust it.
 
-**Whether stabilisation should collapse the API back.** If `unboxed_closures`
-and `fn_traits` stabilise, `Lambda<FN>` can implement `FnMut` and the 25 siblings
-can go away. That would be a superseding record rather than an edit to this one:
-someone following the decision above would then be adding methods that should not
-exist. It would also be a second breaking change to the same surface, and whether
-the ergonomic win is worth charging users for that a second time is exactly the
-argument that record would have to make.
+**Whether stabilisation should collapse the API back.** The usual framing is that
+`unboxed_closures` and `fn_traits` stabilising would let `Lambda<FN>` implement
+`FnMut` and the 25 siblings go away. The experiment above says that is not enough
+on its own: making `Lambda` callable puts it inside the blanket `IsLambda1` impl
+and the two impls then conflict, so the design also needs `specialization`,
+negative impls, or a rearrangement that gives up one of bare closures and declared
+deps. Three unstable features rather than two, and the third is the one with no
+stabilisation in sight.
+
+If that ever resolves, it would be a superseding record rather than an edit to
+this one: someone following the decision above would then be adding methods that
+should not exist. It would also be a second breaking change to the same surface,
+and whether the ergonomic win is worth charging users for that a second time is
+exactly the argument that record would have to make.
