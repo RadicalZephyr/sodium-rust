@@ -149,7 +149,7 @@ pub struct Node {
 pub struct NodeData {
     pub visited: AtomicBool,
     pub changed: AtomicBool,
-    pub update: RwLock<Box<dyn FnMut() + Send + Sync>>,
+    pub update: RwLock<Box<dyn Fn() + Send + Sync>>,
     pub update_dependencies: RwLock<Vec<Dep>>,
     pub dependencies: RwLock<Vec<Box<dyn IsNode + Send + Sync>>>,
     pub dependents: RwLock<Vec<Box<dyn IsWeakNode + Send + Sync>>>,
@@ -195,7 +195,7 @@ impl Node {
     ///
     /// Add a new Node to the Sodium graph, with the given name,
     /// update fn and Node dependencies.
-    pub fn new<UPDATE: FnMut() + Send + Sync + 'static>(
+    pub fn new<UPDATE: Fn() + Send + Sync + 'static>(
         sodium_ctx: &SodiumCtx,
         name: NodeName,
         update: UPDATE,

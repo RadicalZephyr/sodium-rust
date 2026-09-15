@@ -7,13 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
-- New `filter_map` combinator.
-
 ### Changed
 
-- **Breaking:** combinators that take a function are now bounded on `FnMut`/`Fn`
+- **Breaking:** functions that take a closure are now bounded on the `Fn` family
   directly instead of on the `IsLambda1`..`IsLambda6` traits. Closure arguments
   now infer, so call sites no longer need a type annotation on every closure
   parameter (`stream.map(|a| *a + 1)` instead of `stream.map(|a: &_| *a + 1)`).
@@ -22,6 +18,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   looks through the `Fn` family and not through user-defined traits, so a bare
   closure failed with `error[E0282]: type annotations needed` even though the
   element type was fully determined by the receiver.
+- **Breaking:** the combinators are bounded on `Fn` rather than `FnMut`
+  ([#48]). A combinator is meant to be a function of its arguments, and `Fn` is
+  the bound that says so; a closure that mutates a capture is now rejected with
+  `error[E0594]` or `error[E0596]` at the point of mutation.
+
+  Where the state is part of the dataflow — which is most cases — the migration
+  is `accum` or `collect`, which thread the state through the signature instead
+  of a capture, and give you a `Cell` you can sample and compose:
+
+  ```rust
+  // before
+  let mut n = 0;
+  stream.map(move |_a| { n += 1; n })
+  // after
+  stream.collect(0, |_a, n| (*n + 1, *n + 1))
+  ```
+
+  Where it genuinely is not — a cache, say — use `Arc<Mutex<_>>`, which a `Fn`
+  closure may hold.
+
+  `listen` and `listen_weak`, and their `*_with_deps` siblings, keep `FnMut`:
+  they are the effectful edge of the graph and their handlers are there to
+  perform effects. Their mutability is confined to the handler, so the node
+  graph is `Fn` throughout — which is why a node's update is now stored as
+  `dyn Fn` and fired under a shared lock rather than an exclusive one. That
+  removes the obstacle to evaluating independent nodes concurrently, though the
+  evaluator is still serialized today.
 - **Breaking:** passing a `Lambda` built with `lambda1`..`lambda6` to a
   combinator no longer compiles. Use the new `*_with_deps` variant instead:
 
@@ -42,6 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `filter_map` combinator.
 - `*_with_deps` variants of every function-taking combinator, for closures that
   capture FRP nodes Sodium cannot otherwise see: `Stream::map_with_deps`,
   `filter_with_deps`, `filter_map_with_deps`, `merge_with_deps`,
@@ -161,6 +185,8 @@ Version 2 rewrite.
 ## [1.0.0] - 2018-11-17
 
 Initial release.
+
+[#48]: https://github.com/SodiumFRP/sodium-rust/issues/48
 
 [Unreleased]: https://github.com/SodiumFRP/sodium-rust/compare/v2.1.2...HEAD
 [2.1.2]: https://github.com/SodiumFRP/sodium-rust/compare/2.1.1...2.1.2

@@ -185,8 +185,7 @@ impl<A: Send + 'static> Cell<A> {
             {
                 let c = c.clone();
                 sodium_ctx.pre_eot(move || {
-                    let mut update = node.data.update.write();
-                    let update: &mut Box<_> = &mut *update;
+                    let update = node.data.update.read();
                     update();
                     // c captured, but not used so that update() will not crash here
                     c.nop();
@@ -250,23 +249,14 @@ impl<A: Send + 'static> Cell<A> {
     {
         let self_ = self.clone();
         let f_deps = lambda1_deps(&f);
-        let f = Arc::new(Mutex::new(f));
+        let f = Arc::new(f);
         let init;
         {
             let f = f.clone();
-            init = Lazy::new(move || {
-                let mut f = f.lock();
-                f.call(&self_.sample())
-            });
+            init = Lazy::new(move || f.call(&self_.sample()));
         }
         self.updates()
-            .map(lambda1(
-                move |a: &A| {
-                    let mut f = f.lock();
-                    f.call(a)
-                },
-                f_deps,
-            ))
+            .map(lambda1(move |a: &A| f.call(a), f_deps))
             .hold_lazy(init)
     }
 
@@ -287,15 +277,17 @@ impl<A: Send + 'static> Cell<A> {
         let rhs = cb.sample_lazy();
         let init: Lazy<C>;
         let f_deps = lambda2_deps(&f);
+        // Still behind a `Mutex`, but no longer because the lambda needs
+        // exclusive access -- `IsLambda2::call` takes `&self` now. `Arc<FN>` is
+        // only `Send` when `FN: Sync`, and `lift2`'s public bound asks for
+        // `Send` alone, where `Cell::map`'s asks for `Send + Sync`. Dropping
+        // this lock means tightening that bound, which is a separate decision.
         let f = Arc::new(Mutex::new(f));
         {
             let lhs = lhs.clone();
             let rhs = rhs.clone();
             let f = f.clone();
-            init = Lazy::new(move || {
-                let mut f = f.lock();
-                f.call(&lhs.run(), &rhs.run())
-            });
+            init = Lazy::new(move || f.lock().call(&lhs.run(), &rhs.run()));
         }
         let state: Arc<Mutex<(Lazy<A>, Lazy<B>)>> = Arc::new(Mutex::new((lhs, rhs)));
         let s1: Stream<()>;
@@ -317,8 +309,7 @@ impl<A: Send + 'static> Cell<A> {
         let s = s1.or_else(&s2).map(lambda1(
             move |_: &()| {
                 let state2 = state.lock();
-                let mut f = f.lock();
-                f.call(&state2.0.run(), &state2.1.run())
+                f.lock().call(&state2.0.run(), &state2.1.run())
             },
             f_deps,
         ));
@@ -334,7 +325,7 @@ impl<A: Send + 'static> Cell<A> {
         &self,
         cb: &Cell<B>,
         cc: &Cell<C>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<D>
     where
         A: Clone,
@@ -360,7 +351,7 @@ impl<A: Send + 'static> Cell<A> {
         cb: &Cell<B>,
         cc: &Cell<C>,
         cd: &Cell<D>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<E>
     where
         A: Clone,
@@ -391,7 +382,7 @@ impl<A: Send + 'static> Cell<A> {
         cc: &Cell<C>,
         cd: &Cell<D>,
         ce: &Cell<E>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<F>
     where
         A: Clone,
@@ -425,7 +416,7 @@ impl<A: Send + 'static> Cell<A> {
         cd: &Cell<D>,
         ce: &Cell<E>,
         cf: &Cell<F>,
-        mut f: FN,
+        f: FN,
     ) -> Cell<G>
     where
         A: Clone,

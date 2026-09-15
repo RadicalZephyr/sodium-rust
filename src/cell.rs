@@ -1,5 +1,5 @@
 use crate::impl_::cell::Cell as CellImpl;
-use crate::impl_::lambda::{lambda1, lambda2, lambda3, lambda4, lambda5, lambda6};
+use crate::impl_::lambda::{fnmut_as_fn, lambda1, lambda2, lambda3, lambda4, lambda5, lambda6};
 use crate::impl_::lazy::Lazy;
 use crate::listener::Listener;
 use crate::sodium_ctx::SodiumCtx;
@@ -103,7 +103,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// The returned `Cell` always reflects the value produced by the
     /// function applied to the input `Cell`s value. The given
     /// function _must_ be referentially transparent.
-    pub fn map<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+    pub fn map<B: Clone + Send + 'static, FN: Fn(&A) -> B + Send + Sync + 'static>(
         &self,
         f: FN,
     ) -> Cell<B> {
@@ -122,7 +122,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     /// This is a low-level escape hatch. Prefer expressing the
     /// dependency in the network itself, with [`lift2`][Cell::lift2] and
     /// friends, which do this bookkeeping for you.
-    pub fn map_with_deps<B: Clone + Send + 'static, FN: FnMut(&A) -> B + Send + Sync + 'static>(
+    pub fn map_with_deps<B: Clone + Send + 'static, FN: Fn(&A) -> B + Send + Sync + 'static>(
         &self,
         f: FN,
         deps: Vec<Dep>,
@@ -138,7 +138,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     pub fn lift2<
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: FnMut(&A, &B) -> C + Send + 'static,
+        FN: Fn(&A, &B) -> C + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -155,7 +155,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
     pub fn lift2_with_deps<
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
-        FN: FnMut(&A, &B) -> C + Send + 'static,
+        FN: Fn(&A, &B) -> C + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -174,7 +174,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
+        FN: Fn(&A, &B, &C) -> D + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -193,7 +193,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         B: Clone + Send + 'static,
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C) -> D + Send + 'static,
+        FN: Fn(&A, &B, &C) -> D + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -214,7 +214,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
+        FN: Fn(&A, &B, &C, &D) -> E + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -235,7 +235,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         C: Clone + Send + 'static,
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D) -> E + Send + 'static,
+        FN: Fn(&A, &B, &C, &D) -> E + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -260,7 +260,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
+        FN: Fn(&A, &B, &C, &D, &E) -> F + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -284,7 +284,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         D: Clone + Send + 'static,
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E) -> F + Send + 'static,
+        FN: Fn(&A, &B, &C, &D, &E) -> F + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -311,7 +311,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
         G: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
+        FN: Fn(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -337,7 +337,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         E: Clone + Send + 'static,
         F: Clone + Send + 'static,
         G: Clone + Send + 'static,
-        FN: FnMut(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
+        FN: Fn(&A, &B, &C, &D, &E, &F) -> G + Send + 'static,
     >(
         &self,
         cb: &Cell<B>,
@@ -391,7 +391,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         deps: Vec<Dep>,
     ) -> Listener {
         Listener {
-            impl_: self.impl_.listen_weak(lambda1(k, deps)),
+            impl_: self.impl_.listen_weak(lambda1(fnmut_as_fn(k), deps)),
         }
     }
 
@@ -403,6 +403,9 @@ impl<A: Clone + Send + 'static> Cell<A> {
     ///
     /// This is an operational mechanism for interfacing between the
     /// world of I/O and FRP.
+    ///
+    /// Unlike the combinators, which take `Fn`, the handler is `FnMut`: this is
+    /// where effects belong, so it may accumulate into something it captured.
     pub fn listen<K: FnMut(&A) + Send + Sync + 'static>(&self, k: K) -> Listener {
         self.listen_with_deps(k, Vec::new())
     }
@@ -418,7 +421,7 @@ impl<A: Clone + Send + 'static> Cell<A> {
         deps: Vec<Dep>,
     ) -> Listener {
         Listener {
-            impl_: self.impl_.listen(lambda1(k, deps)),
+            impl_: self.impl_.listen(lambda1(fnmut_as_fn(k), deps)),
         }
     }
 }

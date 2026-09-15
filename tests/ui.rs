@@ -12,6 +12,20 @@
 //!   so the reasoning in `tests/closure_type_inference.rs` stays checked rather
 //!   than merely asserted.
 //!
+//! `combinator_rejects_captured_state.rs` and
+//! `listener_accepts_captured_state.rs` belong to a separate question: the
+//! split between `Fn` on the combinators and `FnMut` on the listeners
+//! ([issue #48]). Both run against the real API, and they are the guard on
+//! each side of that split -- the shapes a combinator now refuses, and the
+//! ones a listener still takes. `tests/fn_vs_fnmut.rs` is their runtime half.
+//!
+//! The compiler behaviour that argument rests on is not here. It is recorded
+//! in [ADR-0003](../docs/decisions/0003-fn-bounds-on-combinators.md) as
+//! Playground experiments, which is where a case about rustc rather than about
+//! this crate belongs.
+//!
+//! [issue #48]: https://github.com/SodiumFRP/sodium-rust/issues/48
+//!
 //! Expected output for a failing case lives beside it in a `.stderr` file. To
 //! refresh them after a deliberate change:
 //!
@@ -21,8 +35,8 @@
 //!
 //! rustc's diagnostics are not stable across releases, so the `compile_fail`
 //! cases only run on stable; on beta and nightly a wording change would fail
-//! the build for no useful reason. `bare_closures.rs` has no expected output
-//! and runs everywhere.
+//! the build for no useful reason. The `pass` cases have no expected output, so
+//! `bare_closures.rs` and `listener_accepts_captured_state.rs` run everywhere.
 //!
 //! Everything goes through a single `TestCases`: it drives one shared scratch
 //! project under `target/tests/`, so a second instance in the same binary would
@@ -32,6 +46,7 @@
 fn ui() {
     let t = trybuild::TestCases::new();
     t.pass("tests/ui/bare_closures.rs");
+    t.pass("tests/ui/listener_accepts_captured_state.rs");
     diagnostics(&t);
 }
 
@@ -42,6 +57,11 @@ fn diagnostics(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/single_impl.rs");
     t.pass("tests/ui/fn_bound_rescues_closure.rs");
     t.compile_fail("tests/ui/fn_bound_rejects_lambda.rs");
+    // The `Fn` bound on the combinators refusing a closure that captures --
+    // a rejection this crate promises. ADR-0003 argues for the bound; the
+    // compiler behaviour it argues *from* is recorded there as Playground
+    // experiments rather than here.
+    t.compile_fail("tests/ui/combinator_rejects_captured_state.rs");
 }
 
 #[rustversion::not(stable)]
