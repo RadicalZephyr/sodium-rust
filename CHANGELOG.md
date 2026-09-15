@@ -50,6 +50,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `accum_lazy_with_deps`, `listen_with_deps`, `listen_weak_with_deps`, and
   `Cell::map_with_deps`, `lift2_with_deps`..`lift6_with_deps`,
   `listen_with_deps`, `listen_weak_with_deps`.
+- Tests ported from the other Sodium implementations: sodium-cxx's
+  `test_sodium.cpp`, the cross-language "common tests", sodium-typescript's jest
+  suite, and the Java and .NET bindings. This roughly doubles the suite and adds
+  four new test modules: `common_test` (denotational semantics of the common
+  suite), `denotational_test` (a simulation harness that drives a network one
+  transaction per time step, running switch tests under every send ordering),
+  `listener_test` (listener lifecycle) and `transaction_test` (`SodiumCtx::post`,
+  which had no coverage at all).
+
+  Eleven of the ported tests are `#[ignore]`d because sodium-rust does not yet
+  meet the behaviour they encode. Each carries a FIXME explaining the
+  divergence; in summary:
+
+  - `Operational::defer` puts each deferred send in its own transaction rather
+    than sharing one child transaction, so two deferred streams that should be
+    simultaneous are not.
+  - `SodiumCtx::post` does not run its closure immediately outside a
+    transaction, contrary to its own documentation, and a posted closure runs
+    before `hold` has applied pending cell values, so it sees stale state.
+  - `Cell::map` defers its function until the cell is first sampled, so a node
+    constructed inside the mapping function misses events sent in between.
+  - Chains deeper than about 1800 nodes overflow the stack during construction,
+    because the cycle collector recurses one stack frame per node.
+  - Four networks built on `switch_c`/`switch_s` over defer or nested cells leak
+    nodes or panic inside `collect_cycles` on teardown, while producing correct
+    FRP values.
 
 ## [2.1.3] - 2026-09-02
 
