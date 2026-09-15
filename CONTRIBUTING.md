@@ -42,19 +42,30 @@ Playground experiment.
 the worked example: its reductions lived in `tests/ui/` until that record gave
 them somewhere better, which is why only the pass case is left today.
 
-Any `compile_fail` case carries expected rustc output, which is not stable across
-releases, so it goes behind the `#[rustversion::stable]` gate in `tests/ui.rs` --
-CI runs beta and nightly as well. That gate does not cover an *older* stable, so
-a contributor whose toolchain predates the one the snapshots were blessed against
-gets a red build out of a diff they did not write. It is a real cost and each
-case has to be worth it.
+Any `compile_fail` case carries expected rustc output, and rustc does not keep
+diagnostics stable across releases, so `tests/ui.rs` gates those cases twice over:
+
+- **Locally**, only on the exact stable the snapshots were blessed against,
+  spelled `#[rustversion::stable(1.98)]`. A plain `#[rustversion::stable]` gate
+  excludes beta and nightly but not an *older* stable, which is how a contributor
+  ends up with a red build out of a diff they did not write.
+- **In CI**, on any stable, because checking the snapshots against the current
+  stable is the point of keeping them, and a failure there is addressed to us
+  rather than to a bystander. `const IN_CI: bool = option_env!("CI").is_some();`
+  is the switch -- resolved at compile time, and cargo rebuilds when the variable
+  changes.
+
+Bump the version in both `rustversion` attributes in the same commit as the new
+snapshots. A `compile_fail` case should only ever be left ungated if
+`sodium-rust` itself emits the diagnostic -- if this crate ever ships a
+proc-macro, its errors are ours to promise and ours to keep stable.
 
 After a deliberate change to a diagnostic, re-bless with `TRYBUILD=overwrite
 cargo test --test ui` -- and only after a deliberate change. A mismatch you did
-not cause means your toolchain is not the stable these were blessed against, so
-run `rustup check` first: blessing on an older rustc commits its wording and
-turns CI red, in a diff that looks innocuous. The article in `expected a` versus
-`expected an` is a real example.
+not cause means your toolchain is not the blessed stable, so run `rustup check`
+first: blessing on an older rustc commits its wording and turns CI red, in a diff
+that looks innocuous. The article in `expected a` versus `expected an` is a real
+example.
 
 Tests run against stable, beta and nightly; nightly is allowed to fail. The
 toolchain matrix runs on Linux -- macOS and Windows get stable only, to catch

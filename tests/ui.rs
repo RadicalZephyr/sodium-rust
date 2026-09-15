@@ -16,28 +16,58 @@
 //! record gave them a better home, which is why `diagnostics` below is currently
 //! empty.
 //!
-//! Anything added to `diagnostics` carries expected stderr, which is why it is
-//! gated to stable: CI runs beta and nightly, where a wording change would turn
-//! the build red for no useful reason. The gate does not cover an *older* stable
-//! than the snapshots were blessed against, which is a cost each case has to be
-//! worth.
-//!
-//! Everything goes through a single `TestCases`: it drives one shared scratch
-//! project under `target/tests/`, so a second instance in the same binary would
-//! race with this one.
+//! Anything added to `diagnostics` carries expected stderr, which rustc does not
+//! keep stable across releases. The gating below is what keeps that from costing
+//! a contributor a red build out of a diff they did not write.
+
+/// The exact stable the `.stderr` snapshots were blessed against.
+///
+/// Bump this and `NOT_BLESSED_STABLE` together when re-blessing, in the same
+/// commit as the new snapshots.
+#[rustversion::stable(1.98)]
+const ON_BLESSED_STABLE: bool = true;
+#[rustversion::not(stable(1.98))]
+const ON_BLESSED_STABLE: bool = false;
+
+#[rustversion::stable]
+const ON_SOME_STABLE: bool = true;
+#[rustversion::not(stable)]
+const ON_SOME_STABLE: bool = false;
+
+/// GitHub Actions sets `CI=true`, as does every other runner worth the name.
+///
+/// `option_env!` is resolved at compile time, and rustc records the read in its
+/// dep-info, so cargo rebuilds this target when the variable changes -- checked
+/// by flipping it back and forth on 2026-09-15 against rustc 1.94.1. No clean
+/// build is needed for it to take effect.
+const IN_CI: bool = option_env!("CI").is_some();
+
+/// Locally, run the snapshot cases only on the toolchain they were blessed
+/// against -- an older stable renders diagnostics differently and would fail a
+/// contributor for someone else's diff. In CI, run them on any stable, because
+/// checking the snapshots against the current stable is the point of having
+/// them, and a failure there is addressed to us rather than to a bystander.
+const RUN_DIAGNOSTICS: bool = ON_BLESSED_STABLE || (IN_CI && ON_SOME_STABLE);
+
+/// The strict gate has to be a special case of the loose one. If it were not,
+/// `RUN_DIAGNOSTICS` could turn the snapshots on for a channel that never
+/// blessed them, which is the failure this whole arrangement exists to avoid.
+const _: () = assert!(!ON_BLESSED_STABLE || ON_SOME_STABLE);
 
 #[test]
 fn ui() {
     let t = trybuild::TestCases::new();
     t.pass("tests/ui/bare_closures.rs");
-    diagnostics(&t);
+    if RUN_DIAGNOSTICS {
+        diagnostics(&t);
+    } else {
+        // Says why, so a contributor who expected them does not go looking.
+        eprintln!("ui: skipping the .stderr snapshot cases; not the blessed stable");
+        eprintln!("    blessed={ON_BLESSED_STABLE} stable={ON_SOME_STABLE} ci={IN_CI}");
+    }
 }
 
 /// The cases whose expected stderr is rustc-version sensitive.
 ///
-/// Empty at present; see the note above before adding one.
-#[rustversion::stable]
-fn diagnostics(_t: &trybuild::TestCases) {}
-
-#[rustversion::not(stable)]
+/// Empty at present; see the note at the top of this file before adding one.
 fn diagnostics(_t: &trybuild::TestCases) {}
